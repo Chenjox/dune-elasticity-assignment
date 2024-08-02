@@ -1,0 +1,12 @@
+################################
+# Dune module information file #
+################################
+
+# Name of the module
+Module: biw4-07
+Version: 0.0.1
+Maintainer: jochen.diepelt@mailbox.tu-dresden.de
+# Required build dependencies
+Depends: dune-common dune-typetree dune-geometry dune-uggrid dune-grid dune-localfunctions dune-istl dune-functions dune-alugrid dune-foamgrid dune-vtk dune-curvedgeometry dune-gmsh4
+# Optional build dependencies
+#Suggests:
