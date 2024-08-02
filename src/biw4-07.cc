@@ -1,6 +1,7 @@
 // -*- tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 // vi: set et ts=4 sw=2 sts=2:
 
+#include "dune/common/fmatrix.hh"
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -102,6 +103,9 @@ Matrix<double>& elementMatrix)
           size_t col = localView.tree().child(k).localIndex(j);
 
           // here is the bilinear form of the differential equation!
+          // Compute the stresses
+          FieldMatrix<double, dim, dim*(dim+1)/2> bmatrixReal;
+
           elementMatrix[row][col] += ( gradients[i] * gradients[j] )
           * quadPoint.weight() * integrationElement;
         }

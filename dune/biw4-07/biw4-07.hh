@@ -29,8 +29,11 @@ namespace Dune {
         void linearStrainCMatrix(const Dune::FieldMatrix<field_type, symdim, symdim>& CMatrix, const field_type first_lame, const field_type second_lame) {
             CMatrix = 0;
             if (dim == 2){
-                CMatrix[0][0] = first_lame;
-                CMatrix[1][1] = first_lame;
+                CMatrix[0][0] = 2.0*second_lame + first_lame;
+                CMatrix[0][1] = first_lame;
+                CMatrix[1][1] = 2.0*second_lame + first_lame;
+                CMatrix[1][0] = first_lame;
+                CMatrix[2][2] = 2.0*second_lame;
             }
         }
 
