@@ -308,7 +308,7 @@ int main(int argc, char** argv)
   CGSolver<DisplacementVector> cg(
     stiffnessOperator,
     preconditioner,
-    1e-5, // Desired residual reduction factor
+    1e-8, // Desired residual reduction factor
     50, // Maximum number of iterations
     2); // Verbosity of the solver
   // Object storing some statistics about the solving process
