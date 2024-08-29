@@ -1,13 +1,14 @@
 // -*- tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 // vi: set et ts=4 sw=2 sts=2:
 
+// this is first
+#include "config.h"
 #include "dune/biw4-07/biw4-07.hh"
 #include "dune/common/fmatrix.hh"
 #include <cstddef>
 #include <vector>
-#ifdef HAVE_CONFIG_H
-# include "config.h"
-#endif
+//#ifdef HAVE_CONFIG_H
+//#endif
 #include <dune/common/parallel/mpihelper.hh> // An initializer of MPI
 #include <dune/common/exceptions.hh> // We use exceptions
 
@@ -195,6 +196,8 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, GridFunction& d
 
     // Now let’s get the element stiffness matrix
     // A dense matrix is used for the element stiffness matrix
+    // displacement function must derivative from
+    auto d = derivative(displacements);
     Dune::Matrix<double> elementMatrix;
     assembleElementStiffnessMatrix(localView, elementMatrix, displacements);
     // Add element stiffness matrix onto the global stiffness matrix
@@ -230,7 +233,7 @@ int main(int argc, char** argv)
   using Grid = Dune::YaspGrid<2>;
   Grid grid{ {1.0, 1.0}, {4, 4} };
 
-  auto gv = grid.leafGridView();
+  //auto gv = grid.leafGridView();
 
   using GridView = typename Grid::LeafGridView;
   GridView gridView = grid.leafGridView();
@@ -260,10 +263,13 @@ int main(int argc, char** argv)
 
   // Every Node has `dim` Degrees of Freedom.
   using DisplacementRange = FieldVector<double,dim>;
+  // Nodal Matrix
+  using DisplacementMatrix = FieldMatrix<double,dim,dim>;
   // Multiindex: Nodes x Num Dimension
   using DisplacementVector = BlockVector<DisplacementRange>;
   // Double the Multiindex: One Block for each Node of Dimension (dim x dim)
-  using Matrix = BCRSMatrix<DisplacementRange>;
+  // 
+  using Matrix = BCRSMatrix<DisplacementMatrix>;
   // Marking displacement
   using DisplacementBitVector = std::vector<std::array<char,dim> >;
 
