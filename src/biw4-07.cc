@@ -3,12 +3,14 @@
 
 // this is first
 #include "config.h"
-#include "dune/biw4-07/biw4-07.hh"
 #include "dune/common/fmatrix.hh"
 #include <cstddef>
+#include <iostream>
 #include <vector>
 //#ifdef HAVE_CONFIG_H
 //#endif
+#include "dune/biw4-07/biw4-07.hh"
+
 #include <dune/common/parallel/mpihelper.hh> // An initializer of MPI
 #include <dune/common/exceptions.hh> // We use exceptions
 
@@ -53,11 +55,12 @@ using namespace Dune;
 // therefore we do a template
 // LocalView: LocalView of Geometry
 // 
-template<class LocalView, class GridFunction>
+template<class LocalView, class LocalFunction, class Material>
 void assembleElementStiffnessMatrix(
   const LocalView& localView,
   Matrix<double>& elementMatrix,
-  const GridFunction& displacements)
+  const LocalFunction& localDisplacements,
+  const Material& material)
 {
   // what type of element do I have?
   using Element = typename LocalView::Element;
@@ -77,8 +80,8 @@ void assembleElementStiffnessMatrix(
   const auto& displacementLocalFiniteElement
     = localView.tree().child(0).finiteElement();
 
-  // How many Dofs, on the finite element in total?
-  int num_dofs = displacementLocalFiniteElement.localBasis().size();
+  // How many NODES, on the finite element in total?
+  int num_nodes = displacementLocalFiniteElement.localBasis().size();
 
   // take necessary integration order.
   int order = 2*(dim*displacementLocalFiniteElement.localBasis().order());
@@ -108,32 +111,89 @@ void assembleElementStiffnessMatrix(
     // A two dimensional list of FieldMatrizes, 
     // storing the strains of every shape function of every strain.
     // seems inefficient to me, but it works.
-    std::vector<std::array<FieldMatrix<double, dim, dim>,dim>> deltaLinStrain(num_dofs);
+    std::vector<std::array<FieldMatrix<double, dim, dim>,dim>> deltaLinStrain(num_nodes);
     // Loop over the Dofs
-    for (size_t i=0; i<num_dofs; i++)
+    for (size_t i=0; i<num_nodes; i++)
     {
       for (size_t k=0; k<dim; k++)
       {
         // 
-        FieldMatrix<double,dim,dim> deformationGradient(0);
-        deformationGradient[k] = gradients[i];
+        FieldMatrix<double,dim,dim> displacementGradient(0);
+        displacementGradient[k] = gradients[i];
         //elementMatrix[row][col] += ( gradients[i] * gradients[j] )* quadPoint.weight() * integrationElement;
 
         FieldMatrix<double, dim, dim> linearisedStrains(0);
         for (size_t m=0; m<dim; m++)
           for (size_t n=0; n<dim; n++){
-            linearisedStrains[m][n] += 0.5 * (deformationGradient[m][n] + deformationGradient[m][n]);
+            linearisedStrains[m][n] += 0.5 * (displacementGradient[m][n] + displacementGradient[n][m]);
+        }
+        deltaLinStrain[i][k] = linearisedStrains;
+      }
+    }
+
+    // get the _real_ displacement gradient
+    auto localDerivative = derivative(localDisplacements);
+
+    auto realDispGradient = localDerivative(quadPoint.position());
+    // now create the inverse deformation gradient
+    if (dim == 2) {
+      realDispGradient *= -1.0;
+      realDispGradient[0][0] += 1.0;
+      realDispGradient[1][1] += 1.0;
+    } else {
+      throw Exception();
+    }
+
+    FieldMatrix<double, dim, dim> deformationGradient(0);
+
+    if (dim == 2) {
+      double detInverse = realDispGradient[0][0]*realDispGradient[1][1] - realDispGradient[0][1] * realDispGradient[1][0];
+      deformationGradient[0][0] = 1.0/detInverse *  realDispGradient[1][1];
+      deformationGradient[0][1] = -1.0/detInverse * realDispGradient[1][0];
+      deformationGradient[1][0] = -1.0/detInverse * realDispGradient[0][1];
+      deformationGradient[1][1] = 1.0/detInverse *  realDispGradient[0][0];
+    }
+
+    FieldMatrix<double, dim, dim> cauchyStresses(0);
+    FieldMatrix<double, dim, dim> cauchyStressInkrement(0);
+
+
+    //std::cout << deformationGradient << std::endl;
+
+    material.cauchyStresses(deformationGradient,cauchyStresses);
+
+    //std::cout << cauchyStresses << std::endl; 
+    // Calculating the local Stiffness bases on cauchy
+    //std::cout << num_nodes << std::endl;
+    for (int row = 0; row < num_nodes; row++) {
+      for (int col = 0; col < num_nodes; col++) {
+        for (int i = 0; i < dim; i++) {
+          for (int j = 0; j < dim; j++) {
+            cauchyStressInkrement = 0;
+            auto realDeltStrain = deltaLinStrain[row][i];
+            auto virtDeltStrain = deltaLinStrain[col][j];
+
+            //std::cout << realDeltStrain << std::endl;
+            material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
+
+            //std::cout << cauchyStressInkrement << std::endl;
+
+            elementMatrix[dim*row+i][dim*col+j] +=
+             Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement;
+          }
         }
       }
     }
 
-    // get the _real_ deformation gradient
-    typename GridFunction::DerivativeType localConfGrad;
-    if (displacements.isDefinedOn(element))
-        displacements.evaluateDerivativeLocal(element, quadPoint, localConfGrad);
-    else
-      displacements.evaluateDerivative(geometry.global(quadPoint),localConfGrad);
 
+  }
+
+  for (int i = 0; i < 8; i++) {
+    for (int j = 0; j < 8; j++) {
+      std::cout << elementMatrix[i][j] << " "; 
+    
+    }
+    std::cout << std::endl;
   }
 }
 
@@ -188,18 +248,24 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, GridFunction& d
   matrix = 0;
   // A view on the FE basis on a single element
   auto localView = basis.localView();
+  // A "view" of the function restricted to an element
+  auto localDisp = localFunction(displacements);
   // A loop over all elements of the grid
+  // dummy material
+  auto material = Dune::BIW407::CurrentConfigMaterial<2>(1.0,1.0);
   for (const auto& element : elements(basis.gridView()))
   {
-    // Bind the local FE basis view to the current element
+    //std::cout << element.type() << std::endl;
+    // Bind the local FE basis view to the current element, as well as the local Function
     localView.bind(element);
+    localDisp.bind(element);
+
 
     // Now let’s get the element stiffness matrix
     // A dense matrix is used for the element stiffness matrix
     // displacement function must derivative from
-    auto d = derivative(displacements);
     Dune::Matrix<double> elementMatrix;
-    assembleElementStiffnessMatrix(localView, elementMatrix, displacements);
+    assembleElementStiffnessMatrix(localView, elementMatrix, localDisp, material);
     // Add element stiffness matrix onto the global stiffness matrix
     for (size_t i=0; i<elementMatrix.N(); i++)
     {
@@ -345,6 +411,8 @@ int main(int argc, char** argv)
         }
     }
   }
+
+  std::cout << stiffnessMatrix.frobenius_norm2() << std::endl;
 
   //////////////////////////////////////////////////
   // Solving the ~linear~ system

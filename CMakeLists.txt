@@ -7,6 +7,8 @@ if(NOT (dune-common_DIR OR dune-common_ROOT OR
       ${PROJECT_BINARY_DIR})
 endif()
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 #find dune-common and set the module path
 find_package(dune-common REQUIRED)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/modules"
