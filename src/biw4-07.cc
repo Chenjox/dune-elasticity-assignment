@@ -87,16 +87,44 @@ void assembleElementStiffnessMatrix(
   int order = 2*(dim*displacementLocalFiniteElement.localBasis().order());
   const auto& quad = QuadratureRules<double,dim>::rule(element.type(), order);
 
+  // get the _real_ displacement gradient
+  const auto localDerivative = derivative(localDisplacements);
   // Loop over all quadrature points
   for (const auto& quadPoint : quad)
   {
+
+
+    auto deformationGradient = localDerivative(quadPoint.position());
+    // now create the inverse deformation gradient
+    if (dim == 2) {
+      deformationGradient *= -1.0;
+      deformationGradient[0][0] += 1.0;
+      deformationGradient[1][1] += 1.0;
+    } else {
+      throw Exception();
+    }
+
+    const auto jacobian = deformationGradient.determinant();
+
+    FieldMatrix<double, dim, dim> InverseDeformationGradient(0);
+
+    if (dim == 2) {
+      double detInverse = deformationGradient[0][0]*deformationGradient[1][1] - deformationGradient[0][1] * deformationGradient[1][0];
+      InverseDeformationGradient[0][0] = 1.0/detInverse *  deformationGradient[1][1];
+      InverseDeformationGradient[0][1] = -1.0/detInverse * deformationGradient[1][0];
+      InverseDeformationGradient[1][0] = -1.0/detInverse * deformationGradient[0][1];
+      InverseDeformationGradient[1][1] = 1.0/detInverse *  deformationGradient[0][0];
+    }
+
     // The transposed inverse Jacobian of the map from the
-    // reference element to the element
+    // reference element to the element to the spatial coordinates
     const auto jacobianInverseTransposed
-    = geometry.jacobianInverseTransposed(quadPoint.position());
+    = geometry.jacobianInverseTransposed(quadPoint.position()) * InverseDeformationGradient;
     // The multiplicative factor in the integral transformation formula (chain-rule)
     const auto integrationElement
-    = geometry.integrationElement(quadPoint.position());
+    = geometry.integrationElement(quadPoint.position()) * jacobian;
+
+    
 
     // 
     std::vector<FieldMatrix<double,1,dim> > referenceGradients;
@@ -131,28 +159,6 @@ void assembleElementStiffnessMatrix(
       }
     }
 
-    // get the _real_ displacement gradient
-    auto localDerivative = derivative(localDisplacements);
-
-    auto realDispGradient = localDerivative(quadPoint.position());
-    // now create the inverse deformation gradient
-    if (dim == 2) {
-      realDispGradient *= -1.0;
-      realDispGradient[0][0] += 1.0;
-      realDispGradient[1][1] += 1.0;
-    } else {
-      throw Exception();
-    }
-
-    FieldMatrix<double, dim, dim> deformationGradient(0);
-
-    if (dim == 2) {
-      double detInverse = realDispGradient[0][0]*realDispGradient[1][1] - realDispGradient[0][1] * realDispGradient[1][0];
-      deformationGradient[0][0] = 1.0/detInverse *  realDispGradient[1][1];
-      deformationGradient[0][1] = -1.0/detInverse * realDispGradient[1][0];
-      deformationGradient[1][0] = -1.0/detInverse * realDispGradient[0][1];
-      deformationGradient[1][1] = 1.0/detInverse *  realDispGradient[0][0];
-    }
 
     FieldMatrix<double, dim, dim> cauchyStresses(0);
     FieldMatrix<double, dim, dim> cauchyStressInkrement(0);
@@ -177,9 +183,16 @@ void assembleElementStiffnessMatrix(
             material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
 
             //std::cout << cauchyStressInkrement << std::endl;
+            FieldMatrix<double, dim, dim> ll(0);
+            for (int m = 0; m<dim; m++) {
+              for (int n = 0; n < dim; n++) {
+                ll[m][n] = 0.5*(realDeltStrain[m][n]*virtDeltStrain[n][m] + realDeltStrain[n][m]*virtDeltStrain[m][n]);
+              }
+            }
 
             elementMatrix[dim*row+i][dim*col+j] +=
-             Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement;
+             Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
+             Dune::BIW407::secondOrderContraction(ll, cauchyStresses) * quadPoint.weight() * integrationElement;
           }
         }
       }
@@ -188,13 +201,14 @@ void assembleElementStiffnessMatrix(
 
   }
 
+  /*
   for (int i = 0; i < 8; i++) {
     for (int j = 0; j < 8; j++) {
       std::cout << elementMatrix[i][j] << " "; 
     
     }
     std::cout << std::endl;
-  }
+  }*/
 }
 
 template<class Basis, class Matrix>
@@ -350,6 +364,7 @@ int main(int argc, char** argv)
 
   rhs = 0;
   DisplacementVector x = rhs;
+  DisplacementVector xIncrement = rhs;
 
   auto isBoundaryBackend = Functions::istlVectorBackend(isBoundary);
   isBoundaryBackend.resize(lagrangeBasis);
@@ -371,6 +386,7 @@ int main(int argc, char** argv)
 
   ////
   // Convenience Function for Boundary DOFs
+  // Currently Marks all Boundary dofs
   Functions::forEachBoundaryDOF(
     lagrangeBasis,
     [&] (auto&& index) {
@@ -381,9 +397,9 @@ int main(int argc, char** argv)
   // Genau den hier machen
 
   // Funktion die den Dirichlet-Rand vorgibt
-  auto&& g = [](Coordinate x)
+  auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{0.0, (x[1] - 1.0 < 1e-8) ? 1.0 : 0.0};
+      return DisplacementRange{0.0, (xmat[1] - 1.0 < 1e-8) ? 1.0 : 0.0};
     };
   
   // modify rhs to incorporate dirichlet values
@@ -429,18 +445,25 @@ int main(int argc, char** argv)
   CGSolver<DisplacementVector> cg(
     stiffnessOperator,
     preconditioner,
-    1e-8, // Desired residual reduction factor
+    1e-10, // Desired residual reduction factor
     50, // Maximum number of iterations
     2); // Verbosity of the solver
   // Object storing some statistics about the solving process
   InverseOperatorResult statistics;
   // Solve!
-  cg.apply(x, rhs, statistics);
+
+  std::cout << x << std::endl;
+
+  cg.apply(xIncrement, rhs, statistics);
+
+
+  x += xIncrement;
   
+  std::cout << x << std::endl;
 
   SubsamplingVTKWriter<GridView> vtkWriter(
     gridView,
-    refinementLevels(2));
+    refinementLevels(0));
 
   vtkWriter.addVertexData(
     displacementFunction,

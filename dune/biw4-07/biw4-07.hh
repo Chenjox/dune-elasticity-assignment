@@ -122,8 +122,8 @@ namespace Dune {
                 // All others depending on b
                 double froubeniusProduct = secondOrderContraction(leftCauchy, symGradient); // b : delt e
 
-                std::cout << froubeniusProduct << std::endl;
-                std::cout << symGradient << std::endl;
+                //std::cout << froubeniusProduct << std::endl;
+                //std::cout << symGradient << std::endl;
                 
 
                 // Populating the matrix
