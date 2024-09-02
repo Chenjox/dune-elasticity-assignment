@@ -81,6 +81,7 @@ namespace Dune {
                 }
                 traceb += 1.0; // PLANE STRAIN CORRECTION!
 
+                //std::cout << jacobian << std::endl;
                 //std::cout << leftCauchy << std::endl; 
                 //std::cout << traceb << std::endl; 
 

@@ -5,6 +5,7 @@
 #include "config.h"
 #include "dune/common/fmatrix.hh"
 #include <cstddef>
+#include <cmath>
 #include <iostream>
 #include <vector>
 //#ifdef HAVE_CONFIG_H
@@ -116,6 +117,9 @@ void assembleElementStiffnessMatrix(
       InverseDeformationGradient[1][1] = 1.0/detInverse *  deformationGradient[0][0];
     }
 
+    //std::cout << deformationGradient << std::endl;
+    //std::cout << InverseDeformationGradient << std::endl;
+
     // The transposed inverse Jacobian of the map from the
     // reference element to the element to the spatial coordinates
     const auto jacobianInverseTransposed
@@ -186,7 +190,9 @@ void assembleElementStiffnessMatrix(
             FieldMatrix<double, dim, dim> ll(0);
             for (int m = 0; m<dim; m++) {
               for (int n = 0; n < dim; n++) {
-                ll[m][n] = 0.5*(realDeltStrain[m][n]*virtDeltStrain[n][m] + realDeltStrain[n][m]*virtDeltStrain[m][n]);
+                for (int k = 0; k < dim; k++) {
+                  ll[m][n] += 0.5*(realDeltStrain[k][m]*virtDeltStrain[k][n] + realDeltStrain[k][n]*virtDeltStrain[k][m]);
+                }
               }
             }
 
@@ -256,8 +262,6 @@ Matrix& matrix, const MultiIndex& row, const MultiIndex& col)
 template<class Basis, class Matrix, class GridFunction>
 void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, GridFunction& displacements)
 {
-  // Set matrix size and occupation pattern
-  setOccupationPattern(basis, matrix);
   // Set all entries to zero
   matrix = 0;
   // A view on the FE basis on a single element
@@ -266,7 +270,7 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, GridFunction& d
   auto localDisp = localFunction(displacements);
   // A loop over all elements of the grid
   // dummy material
-  auto material = Dune::BIW407::CurrentConfigMaterial<2>(1.0,1.0);
+  auto material = Dune::BIW407::CurrentConfigMaterial<2>(79.3,160.0);
   for (const auto& element : elements(basis.gridView()))
   {
     //std::cout << element.type() << std::endl;
@@ -290,6 +294,18 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, GridFunction& d
       {
       // The global index of the j-th local degree of freedom
       // of the current element
+
+      // SANITY CHECK!
+        //if (std::isinf(elementMatrix[i][j]) || std::isnan(elementMatrix[i][j])) {
+        //  for (int m = 0; m < 8; m++) {
+        //    for (int n = 0; n < 8; n++) {
+        //      std::cout << elementMatrix[m][n] << " "; 
+        //      }
+        //    std::cout << std::endl;
+        //  }
+        //  throw std::string("Infinite or Nan Value in Stiffness Matrix, aborting");
+        //}
+
         auto col = localView.index(j);
         matrixEntry(matrix, row, col) += elementMatrix[i][j];
       }
@@ -378,13 +394,16 @@ int main(int argc, char** argv)
 
   // Declare the type of the stiffness matrix
 
-  std::cout << "Assembling step." << std::endl;
+  // Set matrix size and occupation pattern
+  setOccupationPattern(lagrangeBasis, stiffnessMatrix);
 
-  assembleStiffnessMatrix(lagrangeBasis, stiffnessMatrix, displacementFunction);
+  //std::cout << "Assembling step." << std::endl;
+// Funktion die den Dirichlet-Rand vorgibt
+  auto&& g = [](Coordinate xmat)
+    {
+      return DisplacementRange{0.0, (xmat[1] - 1.0 < 1e-8) ? 0.00025 : 0.0};
+    };
 
-  std::cout << "Dirichlet step." << std::endl;
-
-  ////
   // Convenience Function for Boundary DOFs
   // Currently Marks all Boundary dofs
   Functions::forEachBoundaryDOF(
@@ -392,81 +411,86 @@ int main(int argc, char** argv)
     [&] (auto&& index) {
       isBoundaryBackend[index] = true;
     });
-  
-  ////
-  // Genau den hier machen
 
-  // Funktion die den Dirichlet-Rand vorgibt
-  auto&& g = [](Coordinate xmat)
-    {
-      return DisplacementRange{0.0, (xmat[1] - 1.0 < 1e-8) ? 1.0 : 0.0};
-    };
+  do {
+
+    assembleStiffnessMatrix(lagrangeBasis, stiffnessMatrix, displacementFunction);
+
+  //std::cout << "Dirichlet step." << std::endl;
   
   // modify rhs to incorporate dirichlet values
-  Functions::interpolate(lagrangeBasis,
-      rhs,
-      g,
-      isBoundary);
-      
-  //stiffnessMatrix.mmv(x,rhs);
-  
-  auto localView = lagrangeBasis.localView();
-  for(const auto& element : elements(gridView))
-  {
-    localView.bind(element);
-    for (size_t i=0; i<localView.size(); ++i)
-    {
-      auto row = localView.index(i);
-      // If row corresponds to a boundary entry,
-      // modify it to be an identity matrix row.
-      if (isBoundaryBackend[row])
-        for (size_t j=0; j<localView.size(); ++j)
-        {
-        auto col = localView.index(j);
-        matrixEntry(stiffnessMatrix, row, col) = (i==j) ? 1 : 0;
-        }
-    }
-  }
+    Functions::interpolate(lagrangeBasis,
+        x,
+        g,
+        isBoundary);
 
-  std::cout << stiffnessMatrix.frobenius_norm2() << std::endl;
+    stiffnessMatrix.mmv(x,rhs);
+
+    // Modify Stiffness Matrix to incorporate Dirichletvalues  
+
+    auto localView = lagrangeBasis.localView();
+    for(const auto& element : elements(gridView))
+    {
+      localView.bind(element);
+      for (size_t i=0; i<localView.size(); ++i)
+      {
+        auto row = localView.index(i);
+        // If row corresponds to a boundary entry,
+        // modify it to be an identity matrix row.
+        if (isBoundaryBackend[row])
+          for (size_t j=0; j<localView.size(); ++j)
+          {
+            auto col = localView.index(j);
+            matrixEntry(stiffnessMatrix, row, col) = (i==j) ? 1 : 0;
+          }
+      }
+    }
+
+    std::cout << stiffnessMatrix.frobenius_norm2() << std::endl;
+
+
 
   //////////////////////////////////////////////////
   // Solving the ~linear~ system
   //////////////////////////////////////////////////
 
   // Turn the matrix into a linear operator
-  std::cout << "Solving step." << std::endl;
+  //std::cout << "Solving step." << std::endl;
 
-  MatrixAdapter<Matrix,DisplacementVector,DisplacementVector> stiffnessOperator(stiffnessMatrix);
+    MatrixAdapter<Matrix,DisplacementVector,DisplacementVector> stiffnessOperator(stiffnessMatrix);
 
   // Sequential incomplete LU decomposition as the preconditioner
-  SeqILU<Matrix,DisplacementVector,DisplacementVector> preconditioner(stiffnessMatrix,1.0); // Relaxation factor
+    SeqILU<Matrix,DisplacementVector,DisplacementVector> preconditioner(stiffnessMatrix,1.0); // Relaxation factor
   // Preconditioned conjugate gradient solver
-  CGSolver<DisplacementVector> cg(
-    stiffnessOperator,
-    preconditioner,
-    1e-10, // Desired residual reduction factor
-    50, // Maximum number of iterations
-    2); // Verbosity of the solver
+    CGSolver<DisplacementVector> cg(
+      stiffnessOperator,
+      preconditioner,
+      1e-10, // Desired residual reduction factor
+      50, // Maximum number of iterations
+      2); // Verbosity of the solver
   // Object storing some statistics about the solving process
-  InverseOperatorResult statistics;
+    InverseOperatorResult statistics;
   // Solve!
+    cg.apply(xIncrement, rhs, statistics);
 
-  std::cout << x << std::endl;
+    x += xIncrement;
 
-  cg.apply(xIncrement, rhs, statistics);
+    
+    
+    //std::cout << x << std::endl;
+
+    SubsamplingVTKWriter<GridView> vtkWriter(
+      gridView,
+      refinementLevels(0));
+
+    vtkWriter.addVertexData(
+      displacementFunction,
+      VTK::FieldInfo("displacement", VTK::FieldInfo::Type::vector, dim));
+    vtkWriter.write("displacement-result");
+
+  } while (xIncrement.two_norm() > 1e-10);
 
 
-  x += xIncrement;
-  
-  std::cout << x << std::endl;
+  //std::cout << xIncrement << std::endl;
 
-  SubsamplingVTKWriter<GridView> vtkWriter(
-    gridView,
-    refinementLevels(0));
-
-  vtkWriter.addVertexData(
-    displacementFunction,
-    VTK::FieldInfo("displacement", VTK::FieldInfo::Type::vector, dim));
-  vtkWriter.write("displacement-result");
 }
