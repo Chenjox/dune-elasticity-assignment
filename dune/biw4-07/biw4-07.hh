@@ -20,9 +20,9 @@ namespace Dune {
         static void linearisedStrain(const Dune::FieldMatrix<field_type, dim, dim>& grad, Dune::FieldMatrix<double,dim,dim>& strain) {
             for (int i=0; i<dim ; ++i)
             {
-                strain(i,i) = grad[i][i];
-                for (int j=i+1; j<dim; ++j)
-                    strain(i,j) = 0.5*(grad[i][j] + grad[j][i]);
+                strain[i][i] = grad[i][i];
+                for (int j=0; j<dim; ++j)
+                    strain[i][j] = 0.5*(grad[i][j] + grad[j][i]);
             }
         }
 
@@ -82,7 +82,7 @@ namespace Dune {
                 traceb += 1.0; // PLANE STRAIN CORRECTION!
 
                 //std::cout << jacobian << std::endl;
-                //std::cout << leftCauchy << std::endl; 
+                //std::cout << leftCauchy.determinant() << std::endl; 
                 //std::cout << traceb << std::endl; 
 
 
@@ -131,25 +131,25 @@ namespace Dune {
                 for (int i = 0; i < dim; i++) {
                     for (int j = 0; j < dim; j++) {
                         if (i== j) {
-                            cauchyStressInkrement[i][j] +=
-                            - this->_shearModulus/3.0 * std::pow(jacobian,-5.0/3.0) 
+                            cauchyStressInkrement[i][j] =
+                            - 2.0*this->_shearModulus/3.0 * std::pow(jacobian,-5.0/3.0) 
                             *(
                                 ( leftCauchy[i][j] - 1.0/3.0 * traceb ) * traceStrain
                                 - traceb * symGradient[i][j]
                                 + froubeniusProduct
                             )
-                            + this->_bulkModulus/(2.0 * jacobian) * (
+                            + this->_bulkModulus/(jacobian) * (
                                 jacobian*jacobian * traceStrain
                                 -(jacobian*jacobian - 1.0) * symGradient[i][j]
                             );
                         } else {
-                            cauchyStressInkrement[i][j] +=
-                            - this->_shearModulus/3.0 * std::pow(jacobian,-5.0/3.0) 
+                            cauchyStressInkrement[i][j] =
+                            -2.0* this->_shearModulus/3.0 * std::pow(jacobian,-5.0/3.0) 
                             *(
                                 ( leftCauchy[i][j] ) * traceStrain
                                 - traceb * symGradient[i][j]
                             )
-                            + this->_bulkModulus/(2.0 * jacobian) * (
+                            + this->_bulkModulus/(jacobian) * (
                                 -(jacobian*jacobian - 1.0) * symGradient[i][j]
                             );
                         }
