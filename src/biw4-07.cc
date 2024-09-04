@@ -125,15 +125,13 @@ void assembleElementStiffnessMatrix(
 
     // The transposed inverse Jacobian of the map from the
     // reference element to the element to the spatial coordinates
+    // This transforms the scalar gradients of the shape functions, not the vector gradient
     const auto jacobianInverseTransposed
-    = geometry.jacobianInverseTransposed(quadPoint.position()) * InverseDeformationGradient.transposed();
+    = InverseDeformationGradient.transposed() * geometry.jacobianInverseTransposed(quadPoint.position());
     // The multiplicative factor in the integral transformation formula (chain-rule)
     const auto integrationElement
     = geometry.integrationElement(quadPoint.position()) * jacobian;
 
-    if (integrationElement <= 0.0){
-      throw std::string("Negative Jacobian detected");
-    }
     
 
     // 
@@ -150,6 +148,7 @@ void assembleElementStiffnessMatrix(
     // storing the strains of every shape function of every strain.
     // seems inefficient to me, but it works.
     std::vector<std::array<FieldMatrix<double, dim, dim>,dim>> deltaLinStrain(num_nodes);
+    std::vector<std::array<FieldMatrix<double, dim, dim>,dim>> sortedGradients(num_nodes);
     // Loop over the Dofs
     for (size_t i=0; i<num_nodes; i++)
     {
@@ -166,15 +165,23 @@ void assembleElementStiffnessMatrix(
         //std::cout << linearisedStrains << std::endl;
     
         deltaLinStrain[i][k] = linearisedStrains;
+        sortedGradients[i][k] = displacementGradient;
       }
     }
+
+
+    std::cout << deformationGradient << std::endl;
+
+    if (integrationElement <= 0.0){
+      throw std::string("Negative Jacobian detected");
+    }
+    
 
 
     FieldMatrix<double, dim, dim> cauchyStresses(0);
     FieldMatrix<double, dim, dim> cauchyStressInkrement(0);
 
 
-    //std::cout << deformationGradient << std::endl;
 
     material.cauchyStresses(deformationGradient,cauchyStresses);
 
@@ -197,16 +204,16 @@ void assembleElementStiffnessMatrix(
             for (int m = 0; m<dim; m++) {
               for (int n = 0; n < dim; n++) {
                 for (int k = 0; k < dim; k++) {
-                  ll[m][n] += 0.5*(realDeltStrain[k][m]*virtDeltStrain[k][n] + realDeltStrain[k][n]*virtDeltStrain[k][m]);
+                  ll[m][n] += sortedGradients[row][i][m][k] * cauchyStresses[k][n];
                 }
               }
             }
 
             elementMatrix[dim*row+i][dim*col+j] +=
              Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
-             Dune::BIW407::secondOrderContraction(ll, cauchyStresses) * quadPoint.weight() * integrationElement;
+             Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
           }
-          residualVector[dim*col+j] += Dune::BIW407::secondOrderContraction(cauchyStresses, virtDeltStrain);
+          residualVector[dim*col+j] += Dune::BIW407::secondOrderContraction(cauchyStresses, sortedGradients[col][j]);
         }
       }
     }
@@ -221,7 +228,8 @@ void assembleElementStiffnessMatrix(
     
     }
     std::cout << std::endl;
-  }*/
+  }
+  std::cout << std::endl;*/
 }
 
 template<class Basis, class Matrix>
@@ -286,7 +294,7 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, Vector& rhs, co
   auto localDisp = localFunction(displacements);
   // A loop over all elements of the grid
   // dummy material
-  auto material = Dune::BIW407::CurrentConfigMaterial<2>(79.3,160.0);
+  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(79.3e6,160.0e7);
   for (const auto& element : elements(basis.gridView()))
   {
     //std::cout << element.type() << std::endl;
@@ -397,8 +405,8 @@ int main(int argc, char** argv)
   rhsBackend.resize(lagrangeBasis);
 
   rhs = 0;
-  DisplacementVector x = rhs;
-  DisplacementVector xIncrement = rhs;
+  DisplacementVector x = rhs; // Copy
+  DisplacementVector xIncrement = rhs; // Copy
 
   auto isBoundaryBackend = Functions::istlVectorBackend(isBoundary);
   isBoundaryBackend.resize(lagrangeBasis);
@@ -419,7 +427,7 @@ int main(int argc, char** argv)
 // Funktion die den Dirichlet-Rand vorgibt
   auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{0.0, (std::abs(xmat[1] - 1.0) < 1e-8) ? 0.0025 : 0.0};
+      return DisplacementRange{0.0, (std::abs(xmat[1] - 1.0) < 1e-8) ? 0.2 : 0.0};
     };
 
   // Convenience Function for Boundary DOFs
@@ -446,7 +454,7 @@ int main(int argc, char** argv)
         isBoundary);
 
     
-    //rhs *=-1.0;
+    rhs *=-1.0;
 
 
     stiffnessMatrix.mmv(x,rhs);
@@ -487,12 +495,12 @@ int main(int argc, char** argv)
   // Sequential incomplete LU decomposition as the preconditioner
     SeqILU<Matrix,DisplacementVector,DisplacementVector> preconditioner(stiffnessMatrix,1.0); // Relaxation factor
   // Preconditioned conjugate gradient solver
-    CGSolver<DisplacementVector> cg(
+    MINRESSolver<DisplacementVector> cg(
       stiffnessOperator,
       preconditioner,
       1e-10, // Desired residual reduction factor
-      500, // Maximum number of iterations
-      2); // Verbosity of the solver
+      100, // Maximum number of iterations
+      1); // Verbosity of the solver
   // Object storing some statistics about the solving process
     InverseOperatorResult statistics;
   // Solve!

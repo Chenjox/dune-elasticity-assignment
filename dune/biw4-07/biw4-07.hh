@@ -5,7 +5,7 @@
 
 #include <dune/common/fvector.hh> 
 #include <dune/common/fmatrix.hh>
-
+#include <dune/biw4-07/currentConfigMaterial.hh>
 
 // add your classes here
 namespace Dune {
@@ -49,7 +49,7 @@ namespace Dune {
         }
 
         template<int dim>
-        class CurrentConfigMaterial {
+        class NeoHookeMaterial : CurrentConfigMaterial<dim> {
 
             double _shearModulus, _bulkModulus;
 
@@ -57,9 +57,13 @@ namespace Dune {
                 Constructing the Material from the given values
             */
             public:
-                CurrentConfigMaterial(double shearModulus, double bulkModulus) :
+                NeoHookeMaterial(double shearModulus, double bulkModulus) :
                     _shearModulus(shearModulus),
                     _bulkModulus(bulkModulus) {};
+
+            double strainEnergyDensity(const Dune::FieldMatrix<double, dim, dim>& deformationGradient){
+                return 0.0;
+            }
 
             /**
                 \brief Computes the Cauchy Stresses from a given deformation gradient.
@@ -155,10 +159,94 @@ namespace Dune {
                         }
                     }
                 }
+            }
 
+        };
+
+        template<int dim>
+        class StVenantKirchhoffMaterial : CurrentConfigMaterial<dim>{
+
+            double _shearModulus,_firstLameParameter;
+
+            public:
+                StVenantKirchhoffMaterial(double shearModulus, double firstLameParameter):
+                    _shearModulus(shearModulus),
+                    _firstLameParameter(firstLameParameter)
+                {};
+
+            double strainEnergyDensity(const Dune::FieldMatrix<double, dim, dim>& deformationGradient) const {
+                return 0.0;
+            }
+
+            void cauchyStresses(const Dune::FieldMatrix<double, dim, dim>& deformationGradient, Dune::FieldMatrix<double, dim, dim>& cauchyStress) const {
+                double jacobian = deformationGradient.determinant();
+                
+                Dune::FieldMatrix<double, dim, dim> leftCauchy(0);
+                Dune::FieldMatrix<double, dim, dim> leftCauchySquared(0);
+                double traceb = 0.0;
+                
+                leftCauchyGreenStretch(deformationGradient, leftCauchy);
+                for (int i = 0; i < dim; i++) {
+                    traceb += leftCauchy[i][i];
+                    for (int j = 0; j < dim; j++) {
+                        for (int k = 0; k < dim; k++) {
+                            leftCauchySquared[i][j] += leftCauchy[i][k]*leftCauchy[k][j];
+                        }
+                    }
+                }
+                traceb += 1.0; // Plane Strain Correction!
+
+                for (int i = 0; i < dim; i++) {
+                    for (int j = 0; j < dim; j++) {
+                        cauchyStress[i][j] = 1.0/jacobian *
+                        (
+                            this->_firstLameParameter * 0.5 * ( traceb * leftCauchy[i][j] - 3.0 * leftCauchy[i][j] )
+                            + this->_shearModulus * ( leftCauchySquared[i][j] - leftCauchy[i][j])
+                        );
+                    }
+                }
+            }
+
+            void cauchyStressInkrement(const Dune::FieldMatrix<double, dim, dim>& deformationGradient, const Dune::FieldMatrix<double, dim, dim>& symGradient, Dune::FieldMatrix<double, dim, dim>& cauchyStressInkrement) const {
+                double jacobian = deformationGradient.determinant();
+                
+                Dune::FieldMatrix<double, dim, dim> leftCauchy(0);
+                Dune::FieldMatrix<double, dim, dim> transportCauchy(0);
+                double traceb = 0.0;
+                double froebenius = 0.0;
+                
+                leftCauchyGreenStretch(deformationGradient, leftCauchy);
+                for (int i = 0; i < dim; i++) {
+                    traceb += leftCauchy[i][i];
+                    for (int j = 0; j < dim; j++){
+                        froebenius += leftCauchy[i][j] * symGradient[i][j];
+                    }
+                }
+                traceb += 1.0; // plane strain
+
+                for (int i = 0; i < dim; i++) {
+                    for (int j = 0; j < dim; j++) {
+                        for (int k = 0; k < dim; k++) {
+                            for (int l = 0; l < dim; l++) {
+                                transportCauchy[i][j] += leftCauchy[i][k] * symGradient[k][l] * leftCauchy[l][j];
+                            }
+                        }
+                    }
+                }
+
+                for (int i = 0; i < dim; i++) {
+                    for (int j = 0; j < dim; j++) {
+                        cauchyStressInkrement[i][j] = 1.0/jacobian *
+                        (
+                            this->_firstLameParameter * 0.5 * ( froebenius * leftCauchy[i][j] )
+                            + this->_shearModulus * ( transportCauchy[i][j])
+                        );
+                    }
+                }
 
 
             }
+            
 
         };
 
