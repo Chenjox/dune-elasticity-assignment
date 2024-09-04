@@ -4,7 +4,7 @@
 cd ..
 # Löschen des build-cmake-verzeichnisses
 dunecontrol exec "rm -r build-cmake"
-dunecontrol exec "git checkout `git rev-list -1 --before="Sep 01 2024" master`"
+dunecontrol exec "git checkout master"
 # führen dunecontrol aus mit den argumenten hier
 dunecontrol --opts=biw4-07/debug.opts all
 cd biw4-07
