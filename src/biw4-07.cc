@@ -99,18 +99,20 @@ void assembleElementStiffnessMatrix(
   {
 
 
-    auto deformationGradient = localDerivative(quadPoint.position());
+    auto displacementGradient = localDerivative(quadPoint.position());
     // now create the inverse deformation gradient
+
+    FieldMatrix<double, dim, dim> deformationGradient(0);
     if (dim == 2) {
-      deformationGradient *= -1.0;
-      deformationGradient[0][0] += 1.0;
-      deformationGradient[1][1] += 1.0;
+      deformationGradient[0][0] = displacementGradient[0][0] + 1.0;
+      deformationGradient[1][0] = displacementGradient[1][0];
+      deformationGradient[0][1] = displacementGradient[0][1];
+      deformationGradient[1][1] = displacementGradient[1][1] + 1.0;
     } else {
       throw Exception();
     }
 
     const auto jacobian = deformationGradient.determinant();
-
     FieldMatrix<double, dim, dim> InverseDeformationGradient(0);
 
     if (dim == 2) {
@@ -126,11 +128,24 @@ void assembleElementStiffnessMatrix(
     // The transposed inverse Jacobian of the map from the
     // reference element to the element to the spatial coordinates
     // This transforms the scalar gradients of the shape functions, not the vector gradient
-    const auto jacobianInverseTransposed
-    = InverseDeformationGradient.transposed() * geometry.jacobianInverseTransposed(quadPoint.position());
+    const auto jacobianInverseTransposed 
+    = geometry.jacobianInverseTransposed(quadPoint.position());
+
+    FieldMatrix<double, dim, dim> pushforwardGradient(0);
+
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
+        for (int k = 0; k < dim; k++) {
+          pushforwardGradient[i][j] += InverseDeformationGradient[k][i] * jacobianInverseTransposed[k][j];
+        }
+      }
+    }
+
+
+
     // The multiplicative factor in the integral transformation formula (chain-rule)
     const auto integrationElement
-    = geometry.integrationElement(quadPoint.position()) * jacobian;
+    = jacobian * geometry.integrationElement(quadPoint.position());
 
     
 
@@ -141,7 +156,8 @@ void assembleElementStiffnessMatrix(
     std::vector<FieldVector<double,dim> > gradients(referenceGradients.size());
     for (size_t i=0; i<gradients.size(); i++){
       gradients[i] = 0.0;
-      jacobianInverseTransposed.mv(referenceGradients[i][0], gradients[i]);
+      pushforwardGradient.mv(referenceGradients[i][0], gradients[i]);
+      //std::cout << gradients[i] << std::endl;
     }
 
     // A two dimensional list of FieldMatrizes, 
@@ -170,7 +186,7 @@ void assembleElementStiffnessMatrix(
     }
 
 
-    std::cout << deformationGradient << std::endl;
+    //std::cout << deformationGradient << std::endl;
 
     if (integrationElement <= 0.0){
       throw std::string("Negative Jacobian detected");
@@ -213,7 +229,7 @@ void assembleElementStiffnessMatrix(
              Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
              Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
           }
-          residualVector[dim*col+j] += Dune::BIW407::secondOrderContraction(cauchyStresses, sortedGradients[col][j]);
+          residualVector[dim*col+j] -= Dune::BIW407::secondOrderContraction(cauchyStresses, sortedGradients[col][j]);
         }
       }
     }
@@ -294,7 +310,7 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, Vector& rhs, co
   auto localDisp = localFunction(displacements);
   // A loop over all elements of the grid
   // dummy material
-  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(79.3e6,160.0e7);
+  auto material = Dune::BIW407::NeoHookeMaterial<2>(79.3,160.0);
   for (const auto& element : elements(basis.gridView()))
   {
     //std::cout << element.type() << std::endl;
@@ -353,7 +369,7 @@ int main(int argc, char** argv)
   // With this the Grid is Read and the geometry is setup.
   // We use YaspGrid for starters
   using Grid = Dune::YaspGrid<2>;
-  Grid grid{ {1.0, 1.0}, {4, 4} };
+  Grid grid{ {1.0, 1.0}, {6, 6} };
 
   //auto gv = grid.leafGridView();
 
@@ -427,7 +443,7 @@ int main(int argc, char** argv)
 // Funktion die den Dirichlet-Rand vorgibt
   auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{0.0, (std::abs(xmat[1] - 1.0) < 1e-8) ? 0.2 : 0.0};
+      return DisplacementRange{0.0, (std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
     };
 
   // Convenience Function for Boundary DOFs
@@ -435,27 +451,28 @@ int main(int argc, char** argv)
   Functions::forEachBoundaryDOF(
     lagrangeBasis,
     [&] (auto&& index) {
+      //vertices(gridView)
       isBoundaryBackend[index] = true;
     });
 
+
+  // Start the NEWTON LOOP
   int iter_num = 0;
   do {
 
     iter_num++;
 
+    
+
     assembleStiffnessMatrix(lagrangeBasis, stiffnessMatrix, rhs, displacementFunction);
 
   //std::cout << "Dirichlet step." << std::endl;
   
-  // modify rhs to incorporate dirichlet values
+    // modify rhs to incorporate dirichlet values
     Functions::interpolate(lagrangeBasis,
         x,
         g,
         isBoundary);
-
-    
-    rhs *=-1.0;
-
 
     stiffnessMatrix.mmv(x,rhs);
 
@@ -474,8 +491,9 @@ int main(int argc, char** argv)
           for (size_t j=0; j<localView.size(); ++j)
           {
             auto col = localView.index(j);
-            matrixEntry(stiffnessMatrix, row, col) = (i==j) ? 1 : 0;
+            matrixEntry(stiffnessMatrix, row, col) = (i==j) ? 1.0 : 0;
           }
+        vectorEntry(rhs, row) = vectorEntry(x, row);
       }
     }
     }
@@ -495,12 +513,12 @@ int main(int argc, char** argv)
   // Sequential incomplete LU decomposition as the preconditioner
     SeqILU<Matrix,DisplacementVector,DisplacementVector> preconditioner(stiffnessMatrix,1.0); // Relaxation factor
   // Preconditioned conjugate gradient solver
-    MINRESSolver<DisplacementVector> cg(
+    CGSolver<DisplacementVector> cg(
       stiffnessOperator,
       preconditioner,
       1e-10, // Desired residual reduction factor
       100, // Maximum number of iterations
-      1); // Verbosity of the solver
+      2); // Verbosity of the solver
   // Object storing some statistics about the solving process
     InverseOperatorResult statistics;
   // Solve!
@@ -523,8 +541,8 @@ int main(int argc, char** argv)
 
     
     
-    std::cout << rhs << std::endl;
-    std::cout << x << std::endl;
+    //std::cout << rhs << std::endl;
+    //std::cout << x << std::endl;
 
     SubsamplingVTKWriter<GridView> vtkWriter(
       gridView,
@@ -535,7 +553,7 @@ int main(int argc, char** argv)
       VTK::FieldInfo("displacement", VTK::FieldInfo::Type::vector, dim));
     vtkWriter.write("displacement-result");
 
-  } while (xIncrement.two_norm() > 1e-10 && iter_num < 2);
+  } while (xIncrement.two_norm() > 1e-10 && iter_num < 100);
 
 
   //std::cout << xIncrement << std::endl;

@@ -61,7 +61,7 @@ namespace Dune {
                     _shearModulus(shearModulus),
                     _bulkModulus(bulkModulus) {};
 
-            double strainEnergyDensity(const Dune::FieldMatrix<double, dim, dim>& deformationGradient){
+            double strainEnergyDensity(const Dune::FieldMatrix<double, dim, dim>& deformationGradient) const {
                 return 0.0;
             }
 
@@ -73,7 +73,7 @@ namespace Dune {
                 @param deformationGradient The given Deformation Gradient
                 @param cauchyStress The FieldMatrix, in which the cauchy stress should be stored in
             */
-            const void cauchyStresses(const Dune::FieldMatrix<double, dim, dim>& deformationGradient, Dune::FieldMatrix<double, dim, dim>& cauchyStress) const {
+            void cauchyStresses(const Dune::FieldMatrix<double, dim, dim>& deformationGradient, Dune::FieldMatrix<double, dim, dim>& cauchyStress) const {
                 double jacobian = deformationGradient.determinant();
                 
                 Dune::FieldMatrix<double, dim, dim> leftCauchy(0);
@@ -238,8 +238,8 @@ namespace Dune {
                     for (int j = 0; j < dim; j++) {
                         cauchyStressInkrement[i][j] = 1.0/jacobian *
                         (
-                            this->_firstLameParameter * 0.5 * ( froebenius * leftCauchy[i][j] )
-                            + this->_shearModulus * ( transportCauchy[i][j])
+                            this->_firstLameParameter * ( froebenius * leftCauchy[i][j] )
+                            + 2.0* this->_shearModulus * ( transportCauchy[i][j])
                         );
                     }
                 }
