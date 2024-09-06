@@ -131,6 +131,7 @@ void assembleElementStiffnessMatrix(
     const auto jacobianInverseTransposed 
     = geometry.jacobianInverseTransposed(quadPoint.position());
 
+    /*
     FieldMatrix<double, dim, dim> pushforwardGradient(0);
 
     for (int i = 0; i < dim; i++) {
@@ -139,8 +140,10 @@ void assembleElementStiffnessMatrix(
           pushforwardGradient[i][j] += InverseDeformationGradient[k][i] * jacobianInverseTransposed[k][j];
         }
       }
-    }
+    }*/
+    auto pushforwardGradient = InverseDeformationGradient.transposed() * jacobianInverseTransposed;
 
+    std::cout << pushforwardGradient << std::endl;
 
 
     // The multiplicative factor in the integral transformation formula (chain-rule)
@@ -206,11 +209,11 @@ void assembleElementStiffnessMatrix(
     //std::cout << num_nodes << std::endl;
     for (int row = 0; row < num_nodes; row++) {
       for (int col = 0; col < num_nodes; col++) {
-        for (int j = 0; j < dim; j++) {
-          auto virtDeltStrain = deltaLinStrain[col][j];
-          for (int i = 0; i < dim; i++) {
+        for (int i = 0; i < dim; i++) {
+          auto realDeltStrain = deltaLinStrain[row][i];
+          for (int j = 0; j < dim; j++) {
             cauchyStressInkrement = 0;
-            auto realDeltStrain = deltaLinStrain[row][i];
+            auto virtDeltStrain = deltaLinStrain[col][j];
 
             //std::cout << realDeltStrain << std::endl;
             material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
@@ -229,7 +232,7 @@ void assembleElementStiffnessMatrix(
              Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
              Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
           }
-          residualVector[dim*col+j] -= Dune::BIW407::secondOrderContraction(cauchyStresses, sortedGradients[col][j]);
+          residualVector[dim*row+i] -= Dune::BIW407::secondOrderContraction(cauchyStresses, sortedGradients[row][i]);
         }
       }
     }
@@ -553,7 +556,7 @@ int main(int argc, char** argv)
       VTK::FieldInfo("displacement", VTK::FieldInfo::Type::vector, dim));
     vtkWriter.write("displacement-result");
 
-  } while (xIncrement.two_norm() > 1e-10 && iter_num < 100);
+  } while (xIncrement.two_norm() > 1e-10 && iter_num < 3);
 
 
   //std::cout << xIncrement << std::endl;
