@@ -23,9 +23,15 @@ dune_project()
 dune_enable_all_packages()
 
 add_subdirectory(src)
+add_subdirectory(test)
 add_subdirectory(dune)
 add_subdirectory(doc)
 add_subdirectory(cmake/modules)
+
+foreach(_program ${programs})
+    add_executable(${_program} ${_program}.cc)
+endforeach()
+
 
 # finalize the dune project, e.g. generating config.h etc.
 finalize_dune_project()

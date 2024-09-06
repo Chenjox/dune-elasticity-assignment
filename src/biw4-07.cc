@@ -89,7 +89,7 @@ void assembleElementStiffnessMatrix(
   int num_nodes = displacementLocalFiniteElement.localBasis().size();
 
   // take necessary integration order.
-  int order = 2*(dim*displacementLocalFiniteElement.localBasis().order());
+  int order = (dim*displacementLocalFiniteElement.localBasis().order());
   const auto& quad = QuadratureRules<double,dim>::rule(element.type(), order);
 
   // get the _real_ displacement gradient
@@ -100,7 +100,7 @@ void assembleElementStiffnessMatrix(
 
 
     auto displacementGradient = localDerivative(quadPoint.position());
-    // now create the inverse deformation gradient
+    // now create the deformation gradient
 
     FieldMatrix<double, dim, dim> deformationGradient(0);
     if (dim == 2) {
@@ -112,6 +112,7 @@ void assembleElementStiffnessMatrix(
       throw Exception();
     }
 
+    // compute the inverse
     const auto jacobian = deformationGradient.determinant();
     FieldMatrix<double, dim, dim> InverseDeformationGradient(0);
 
@@ -128,6 +129,7 @@ void assembleElementStiffnessMatrix(
     // The transposed inverse Jacobian of the map from the
     // reference element to the element to the spatial coordinates
     // This transforms the scalar gradients of the shape functions, not the vector gradient
+    // because YASPGrid returns a diagonal Matrix, this one behaves weird.
     const auto jacobianInverseTransposed 
     = geometry.jacobianInverseTransposed(quadPoint.position());
 
@@ -141,16 +143,16 @@ void assembleElementStiffnessMatrix(
         }
       }
     }*/
+
+    // Compute the pushforward G = F^-T * J^-T
     auto pushforwardGradient = InverseDeformationGradient.transposed() * jacobianInverseTransposed;
 
-    std::cout << pushforwardGradient << std::endl;
+    //std::cout << pushforwardGradient << std::endl;
 
 
     // The multiplicative factor in the integral transformation formula (chain-rule)
     const auto integrationElement
     = jacobian * geometry.integrationElement(quadPoint.position());
-
-    
 
     // 
     std::vector<FieldMatrix<double,1,dim> > referenceGradients;
@@ -174,26 +176,26 @@ void assembleElementStiffnessMatrix(
       for (size_t k=0; k<dim; k++)
       {
         // 
-        FieldMatrix<double,dim,dim> displacementGradient(0);
-        displacementGradient[k] = gradients[i];
+        FieldMatrix<double,dim,dim> displacementGradiente(0);
+        displacementGradiente[k] = gradients[i];
         //elementMatrix[row][col] += ( gradients[i] * gradients[j] )* quadPoint.weight() * integrationElement;
 
         FieldMatrix<double, dim, dim> linearisedStrains(0);
 
-        Dune::BIW407::linearisedStrain(displacementGradient, linearisedStrains);
+        Dune::BIW407::linearisedStrain(displacementGradiente, linearisedStrains);
         //std::cout << linearisedStrains << std::endl;
     
         deltaLinStrain[i][k] = linearisedStrains;
-        sortedGradients[i][k] = displacementGradient;
+        sortedGradients[i][k] = displacementGradiente;
       }
     }
 
 
     //std::cout << deformationGradient << std::endl;
 
-    if (integrationElement <= 0.0){
-      throw std::string("Negative Jacobian detected");
-    }
+    //if (integrationElement <= 0.0){
+    //  throw std::string("Negative Jacobian detected");
+    //}
     
 
 
@@ -227,6 +229,7 @@ void assembleElementStiffnessMatrix(
                 }
               }
             }
+            //std::cout << ll << std::endl;
 
             elementMatrix[dim*row+i][dim*col+j] +=
              Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
@@ -313,7 +316,7 @@ void assembleStiffnessMatrix(const Basis& basis, Matrix& matrix, Vector& rhs, co
   auto localDisp = localFunction(displacements);
   // A loop over all elements of the grid
   // dummy material
-  auto material = Dune::BIW407::NeoHookeMaterial<2>(79.3,160.0);
+  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0,230.0);
   for (const auto& element : elements(basis.gridView()))
   {
     //std::cout << element.type() << std::endl;
@@ -372,7 +375,7 @@ int main(int argc, char** argv)
   // With this the Grid is Read and the geometry is setup.
   // We use YaspGrid for starters
   using Grid = Dune::YaspGrid<2>;
-  Grid grid{ {1.0, 1.0}, {6, 6} };
+  Grid grid{ {1.0, 1.0}, {2, 2} };
 
   //auto gv = grid.leafGridView();
 
@@ -446,7 +449,7 @@ int main(int argc, char** argv)
 // Funktion die den Dirichlet-Rand vorgibt
   auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{0.0, (std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
+      return DisplacementRange{-0.1, -0.1};//(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
     };
 
   // Convenience Function for Boundary DOFs
@@ -463,21 +466,24 @@ int main(int argc, char** argv)
   int iter_num = 0;
   do {
 
+    xIncrement = 0;
+
     iter_num++;
 
-    
 
-    assembleStiffnessMatrix(lagrangeBasis, stiffnessMatrix, rhs, displacementFunction);
-
-  //std::cout << "Dirichlet step." << std::endl;
-  
     // modify rhs to incorporate dirichlet values
     Functions::interpolate(lagrangeBasis,
         x,
         g,
         isBoundary);
 
+    assembleStiffnessMatrix(lagrangeBasis, stiffnessMatrix, rhs, displacementFunction);
+
+  //std::cout << "Dirichlet step." << std::endl;
+  
+
     stiffnessMatrix.mmv(x,rhs);
+
 
     // Modify Stiffness Matrix to incorporate Dirichletvalues  
     {
@@ -516,7 +522,7 @@ int main(int argc, char** argv)
   // Sequential incomplete LU decomposition as the preconditioner
     SeqILU<Matrix,DisplacementVector,DisplacementVector> preconditioner(stiffnessMatrix,1.0); // Relaxation factor
   // Preconditioned conjugate gradient solver
-    CGSolver<DisplacementVector> cg(
+    MINRESSolver<DisplacementVector> cg(
       stiffnessOperator,
       preconditioner,
       1e-10, // Desired residual reduction factor
