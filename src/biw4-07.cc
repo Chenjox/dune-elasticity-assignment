@@ -168,12 +168,12 @@ void assembleElementStiffnessMatrix(
     //std::cout << deformationGradient << std::endl;
     //std::cout << cauchyStresses << std::endl;
 
-    for (int col = 0; col < num_nodes; col++) {
-      for (int j = 0; j < dim; j++) {
-        auto virtDeltStrain = deltaLinStrain[col][j];
-        for (int row = 0; row < num_nodes; row++) {
-          for (int i = 0; i < dim; i++) {
-            auto realDeltStrain = deltaLinStrain[row][i];
+    for (int row = 0; row < num_nodes; row++) {
+      for (int i = 0; i < dim; i++) {
+        auto realDeltStrain = deltaLinStrain[row][i];
+          for (int col = 0; col < num_nodes; col++) {
+            for (int j = 0; j < dim; j++) {
+            auto virtDeltStrain = deltaLinStrain[col][j];
             cauchyStressInkrement = 0;
 
             //std::cout << realDeltStrain << std::endl;
@@ -195,7 +195,7 @@ void assembleElementStiffnessMatrix(
              Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
           }
         }
-        residualVector[dim*col+j] -= Dune::BIW407::secondOrderContraction(cauchyStresses, virtDeltStrain);
+        residualVector[dim*row+i] -= Dune::BIW407::secondOrderContraction(cauchyStresses, realDeltStrain);
       }
     }
 
