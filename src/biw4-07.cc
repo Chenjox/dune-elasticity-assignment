@@ -202,7 +202,7 @@ void assembleElementStiffnessMatrix(
 
   }
 
-  
+  /*
   for (int i = 0; i < 8; i++) {
     for (int j = 0; j < 8; j++) {
       std::cout << elementMatrix[i][j] << " "; 
@@ -211,6 +211,7 @@ void assembleElementStiffnessMatrix(
     std::cout << std::endl;
   }
   std::cout << std::endl;
+  */
 }
 
 template<class Basis, class Matrix>
@@ -275,7 +276,7 @@ void assembleStiffnessMatrix(const CurvedGridView& curvedGridView, const Displac
   auto localDisplacementFunction = localFunction(displacements);
   auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0,170.0);
 
-  // Traverse the reference grid
+  // Traverse the curved grid
   for (const auto& element : elements(curvedGridView))
   {
     //std::cout << element.type() << std::endl;
@@ -298,24 +299,10 @@ void assembleStiffnessMatrix(const CurvedGridView& curvedGridView, const Displac
     auto row = localBasisView.index(i);
     for (size_t j=0; j<elementMatrix.M(); j++ )
       {
-      // The global index of the j-th local degree of freedom
-      // of the current element
-
-      // SANITY CHECK!
-        //if (std::isinf(elementMatrix[i][j]) || std::isnan(elementMatrix[i][j])) {
-        //  for (int m = 0; m < 8; m++) {
-        //    for (int n = 0; n < 8; n++) {
-        //      std::cout << elementMatrix[m][n] << " "; 
-        //      }
-        //    std::cout << std::endl;
-        //  }
-        //  throw std::string("Infinite or Nan Value in Stiffness Matrix, aborting");
-        //}
-
         auto col = localBasisView.index(j);
         matrixEntry(matrix, row, col) += elementMatrix[i][j];
       }
-      vectorEntry(rhs, row) += elementResidualVector[i];
+    vectorEntry(rhs, row) += elementResidualVector[i];
     }
   }
 }
@@ -436,7 +423,7 @@ int main(int argc, char** argv)
 // Funktion die den Dirichlet-Rand vorgibt
   auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{-0.0, -0.1};//(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
+      return DisplacementRange{-0.0, -0.01};//(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
     };
 
   // Convenience Function for Boundary DOFs
