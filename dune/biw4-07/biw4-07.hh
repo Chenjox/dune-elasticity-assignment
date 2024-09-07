@@ -56,7 +56,7 @@ namespace Dune {
         //! C = F * F^T
         template<int dim, class field_type=double>
         static void leftCauchyGreenStretch(const Dune::FieldMatrix<field_type, dim, dim>& deformationGradient,Dune::FieldMatrix<field_type, dim, dim>& leftCauchyGreen){
-            leftCauchyGreen = deformationGradient * deformationGradient.transposed();
+            leftCauchyGreen = deformationGradient.rightmultiplyany(deformationGradient.transposed());
             /*
             for (int i=0; i<dim ; ++i) {
                 for (int j=0; j<dim; ++j){
@@ -95,7 +95,19 @@ namespace Dune {
                     _bulkModulus(bulkModulus) {};
 
             double strainEnergyDensity(const Dune::FieldMatrix<double, dim, dim>& deformationGradient) const {
-                return 0.0;
+                double jacobian = deformationGradient.determinant();
+
+                Dune::FieldMatrix<double, dim, dim> rightCauchyGreen(0.0);
+
+                rightCauchyGreenStretch(deformationGradient, rightCauchyGreen);
+                double traceC = 0.0;
+                for (int i = 0; i < dim; i++) {
+                    traceC += rightCauchyGreen[i][i];
+                }
+                traceC += 1.0; // Plane Strain
+
+
+                return _shearModulus * 0.5 * ( std::pow(jacobian, -2.0/3.0) * traceC - 3.0 ) + _bulkModulus * 0.25 * (jacobian*jacobian - 1.0 - 2.0 * std::log(jacobian));
             }
 
             /**
@@ -230,17 +242,18 @@ namespace Dune {
                 }
                 //traceE += 1.0;
 
-                return this->_firstLameParameter * 0.5 * traceE * traceE
-                + this->_shearModulus * froebenius;
+                return _firstLameParameter * 0.5 * traceE * traceE
+                + _shearModulus * froebenius;
             }
 
             void cauchyStresses(const Dune::FieldMatrix<double, dim, dim>& deformationGradient, Dune::FieldMatrix<double, dim, dim>& cauchyStress) const {
                 double jacobian = deformationGradient.determinant();
                 
-                Dune::FieldMatrix<double, dim, dim> leftCauchy(0);
-                Dune::FieldMatrix<double, dim, dim> leftCauchySquared(0);
+                Dune::FieldMatrix<double, dim, dim> leftCauchy(0.0);
+                Dune::FieldMatrix<double, dim, dim> leftCauchySquared(0.0);
+                Dune::FieldMatrix<double, dim, dim> rightCauchyGreen(0.0);
                 double traceb = 0.0;
-                
+
                 leftCauchyGreenStretch(deformationGradient, leftCauchy);
                 
                 leftCauchySquared = leftCauchy * leftCauchy;
@@ -254,8 +267,8 @@ namespace Dune {
                     for (int j = 0; j < dim; j++) {
                         cauchyStress[i][j] = 1.0/jacobian *
                         (
-                            this->_firstLameParameter *0.5* ( traceb - 3.0 )* leftCauchy[i][j]
-                            + this->_shearModulus * ( leftCauchySquared[i][j] - leftCauchy[i][j])
+                            (_firstLameParameter) * 0.5 * ( traceb - 3.0 ) * (leftCauchy[i][j])
+                            + (_shearModulus) * ( (leftCauchySquared[i][j]) - (leftCauchy[i][j]))
                         );
                     }
                 }
@@ -292,8 +305,8 @@ namespace Dune {
                     for (int j = 0; j < dim; j++) {
                         cauchyStressInkrement[i][j] = 1.0/jacobian *
                         (
-                            this->_firstLameParameter * ( froebenius * leftCauchy[i][j] )
-                            + 2.0* this->_shearModulus * ( transportCauchy[i][j])
+                            _firstLameParameter * ( froebenius * leftCauchy[i][j] )
+                            + 2.0* _shearModulus * ( transportCauchy[i][j])
                         );
                     }
                 }
