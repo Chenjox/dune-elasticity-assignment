@@ -18,10 +18,6 @@
 #include <dune/grid/yaspgrid.hh>
 // With this the Mesh will be isoparametric for 
 //#include <dune/foamgrid/foamgrid.hh> // <-- does only work for quads
-//#include <dune/grid/uggrid.hh>
-//#include <dune/curvedgrid/curvedgrid.hh>
-//#include "dune/gmsh4/gmsh4reader.hh"
-//#include <dune/gmsh4/gmsh4reader.impl.hh>
 
 // Matrix types and storage, as well as convenience
 #include <dune/istl/matrix.hh>
@@ -46,9 +42,17 @@
 #include <dune/functions/gridfunctions/gridviewfunction.hh>
 #include <dune/functions/gridfunctions/gridfunction.hh>
 
-// For Plotting in Paraview
-#include <dune/grid/io/file/vtk/subsamplingvtkwriter.hh>
+#include <dune/grid/uggrid.hh>
+#include <dune/curvedgrid/curvedgrid.hh>
+#include <dune/curvedgrid/gridfunctions/discretegridviewfunction.hh>
+//#include "dune/gmsh4/gmsh4reader.hh"
+//#include <dune/gmsh4/gmsh4reader.impl.hh>
 
+
+// For Plotting in Paraview
+//#include <dune/grid/io/file/vtk/subsamplingvtkwriter.hh>
+#include <dune/vtk/vtkwriter.hh>
+#include <dune/vtk/datacollectors/lagrangedatacollector.hh>
 
 using namespace Dune;
 
@@ -114,17 +118,15 @@ void assembleElementStiffnessMatrix(
 
     // compute the inverse
     const auto jacobian = deformationGradient.determinant();
-    FieldMatrix<double, dim, dim> InverseDeformationGradient(0);
+    FieldMatrix<double, dim, dim> InverseDeformationGradient = Dune::BIW407::inverse(deformationGradient);
+    FieldMatrix<double, dim, dim> spatialDisplacementGradient = displacementGradient * InverseDeformationGradient;
 
-    if (dim == 2) {
-      InverseDeformationGradient[0][0] = 1.0/jacobian *  deformationGradient[1][1];
-      InverseDeformationGradient[0][1] = -1.0/jacobian * deformationGradient[1][0];
-      InverseDeformationGradient[1][0] = -1.0/jacobian * deformationGradient[0][1];
-      InverseDeformationGradient[1][1] = 1.0/jacobian *  deformationGradient[0][0];
-    }
+    spatialDisplacementGradient *= -1.0;
+    spatialDisplacementGradient[0][0] += 1.0;
+    spatialDisplacementGradient[1][1] += 1.0;
 
-    //std::cout << deformationGradient << std::endl;
-    //std::cout << InverseDeformationGradient << std::endl;
+    std::cout << "F^-1 = I - h" << std::endl << spatialDisplacementGradient << std::endl;
+    std::cout << "F^-1 = (I + H)^-1" << std::endl <<InverseDeformationGradient << std::endl;
 
     // The transposed inverse Jacobian of the map from the
     // reference element to the element to the spatial coordinates
@@ -133,26 +135,15 @@ void assembleElementStiffnessMatrix(
     const auto jacobianInverseTransposed 
     = geometry.jacobianInverseTransposed(quadPoint.position());
 
-    /*
-    FieldMatrix<double, dim, dim> pushforwardGradient(0);
-
-    for (int i = 0; i < dim; i++) {
-      for (int j = 0; j < dim; j++) {
-        for (int k = 0; k < dim; k++) {
-          pushforwardGradient[i][j] += InverseDeformationGradient[k][i] * jacobianInverseTransposed[k][j];
-        }
-      }
-    }*/
-
     // Compute the pushforward G = F^-T * J^-T
-    auto pushforwardGradient = InverseDeformationGradient.transposed() * jacobianInverseTransposed;
+    auto pushforwardGradient = spatialDisplacementGradient.transposed()  * jacobianInverseTransposed;
 
     //std::cout << pushforwardGradient << std::endl;
 
 
     // The multiplicative factor in the integral transformation formula (chain-rule)
     const auto integrationElement
-    = jacobian * geometry.integrationElement(quadPoint.position());
+    = 1.0/spatialDisplacementGradient.determinant() * geometry.integrationElement(quadPoint.position());
 
     // 
     std::vector<FieldMatrix<double,1,dim> > referenceGradients;
@@ -366,35 +357,33 @@ int main(int argc, char** argv)
 {
   // Maybe initialize MPI
   MPIHelper& helper = Dune::MPIHelper::instance(argc, argv);
+  // World Dimension
   constexpr int dim = 2;
+  // Linear Ansatz Order
+  constexpr int p = 1;
 
 
   /////////////////////////////////////////////////////////
   // GRID DATA
   /////////////////////////////////////////////////////////
   // With this the Grid is Read and the geometry is setup.
+  // Unfortunately I need to use a _moving Grid_
+  // But the reference Grid is still a YaspGrid for startes
   // We use YaspGrid for starters
-  using Grid = Dune::YaspGrid<2>;
-  Grid grid{ {1.0, 1.0}, {2, 2} };
+  using RefGrid = Dune::YaspGrid<2>;
+  RefGrid refGrid{ {1.0, 1.0}, {2, 2} };
 
-  //auto gv = grid.leafGridView();
-
-  using GridView = typename Grid::LeafGridView;
-  GridView gridView = grid.leafGridView();
-
-  using namespace Functions::BasisFactory;
-
-  using Coordinate = GridView::Codim<0> ::Geometry::GlobalCoordinate;
+  auto refGridView = refGrid.leafGridView();
+  using RefGridView = decltype(refGridView);
 
   //////////////////////////////////////////////////////////
   // Function Space Basis
   //////////////////////////////////////////////////////////
 
-  // Linear Ansatz Order
-  constexpr int p = 1;
-
+  using namespace Functions::BasisFactory;
   // constructing the basis:
-  auto lagrangeBasis = makeBasis(gridView,
+  // which is a function on the reference geometry
+  auto lagrangeBasis = makeBasis(refGridView,
                                    power<dim>(
                                    lagrange<p>(),
                                    blockedInterleaved())); 
@@ -433,7 +422,20 @@ int main(int argc, char** argv)
   auto isBoundaryBackend = Functions::istlVectorBackend(isBoundary);
   isBoundaryBackend.resize(lagrangeBasis);
 
+  // Now the Displacement is represented as a function, which can now be used to interpolate the current geometry
   auto displacementFunction = Functions::makeDiscreteGlobalBasisFunction<DisplacementRange>(lagrangeBasis, x);
+
+  // Now we have the Actual Grid, on which we do our calculations
+  // The MeshDisplacements are given via a std::ref to circumvent a copy.
+  CurvedGrid grid{refGrid, std::ref(displacementFunction)};
+  
+  // We now contruct the gridView of the CurvedGrid 
+  auto gridView = grid.leafGridView();
+  using GridView = decltype(gridView);
+
+  using Coordinate = GridView::Codim<0> ::Geometry::GlobalCoordinate;
+
+  //////////////
 
   using namespace Indices;
   for (auto&& b0i : isBoundary)
@@ -488,7 +490,7 @@ int main(int argc, char** argv)
     // Modify Stiffness Matrix to incorporate Dirichletvalues  
     {
     auto localView = lagrangeBasis.localView();
-    for(const auto& element : elements(gridView))
+    for(const auto& element : elements(refGridView))
     {
       localView.bind(element);
       for (size_t i=0; i<localView.size(); ++i)
@@ -534,7 +536,7 @@ int main(int argc, char** argv)
     cg.apply(xIncrement, rhs, statistics);
 
     auto localView = lagrangeBasis.localView();
-    for(const auto& element : elements(gridView))
+    for(const auto& element : elements(refGridView))
     {
       localView.bind(element);
       for (size_t i=0; i<localView.size(); ++i)
@@ -553,14 +555,14 @@ int main(int argc, char** argv)
     //std::cout << rhs << std::endl;
     //std::cout << x << std::endl;
 
-    SubsamplingVTKWriter<GridView> vtkWriter(
-      gridView,
-      refinementLevels(0));
+    // Because the Displacements live on the reference configuration, the reference _grid_ will be written.
+    using DataCollector = Vtk::LagrangeDataCollector<RefGridView,p>;
+    using Writer = VtkUnstructuredGridWriter<RefGridView , DataCollector>;
 
-    vtkWriter.addVertexData(
-      displacementFunction,
-      VTK::FieldInfo("displacement", VTK::FieldInfo::Type::vector, dim));
-    vtkWriter.write("displacement-result");
+    Writer vtkWriter(refGridView);
+
+    vtkWriter.addPointData(displacementFunction, "displacement");
+    vtkWriter.write("displacement-result.vtu");
 
   } while (xIncrement.two_norm() > 1e-10 && iter_num < 3);
 
