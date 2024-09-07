@@ -71,7 +71,7 @@ int main (int argc, char** argv)
     
     std::uniform_real_distribution<double> distribution(-1.0,1.0);
 
-    auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(30.0,70.0);
+    auto material = Dune::BIW407::NeoHookeMaterial<2>(30.0,70.0);
 
     for (int i = 0; i < 10000; i++) {
         

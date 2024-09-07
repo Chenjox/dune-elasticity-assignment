@@ -180,7 +180,7 @@ void assembleElementStiffnessMatrix(
             material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
 
             //std::cout << cauchyStressInkrement << std::endl;
-            FieldMatrix<double, dim, dim> ll(0);
+            FieldMatrix<double, dim, dim> ll(0.0);
             for (int m = 0; m<dim; m++) {
               for (int n = 0; n < dim; n++) {
                 for (int k = 0; k < dim; k++) {
