@@ -436,7 +436,7 @@ int main(int argc, char** argv)
 // Funktion die den Dirichlet-Rand vorgibt
   auto&& g = [](Coordinate xmat)
     {
-      return DisplacementRange{-0.0, -0.5};//(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
+      return DisplacementRange{-0.0, -0.1};//(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
     };
 
   // Convenience Function for Boundary DOFs
