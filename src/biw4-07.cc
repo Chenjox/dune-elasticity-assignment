@@ -151,9 +151,9 @@ void assembleElementStiffnessMatrix(
     // now to the displacement gradient in spatial coordinates
     auto displacementGradient = localDisplacmentDerivative(quadPoint.position());
 
-    Dune::FieldMatrix<double, dim, dim> InverseDeformationGradient = displacementGradient;
+    Dune::FieldMatrix<double, dim, dim> InverseDeformationGradient = -displacementGradient;
 
-    InverseDeformationGradient *= -1.0;
+    //InverseDeformationGradient *= -1.0;
 
     InverseDeformationGradient[0][0] += 1.0;
     InverseDeformationGradient[1][1] += 1.0;
@@ -165,13 +165,13 @@ void assembleElementStiffnessMatrix(
     FieldMatrix<double, dim, dim> cauchyStressInkrement(0);
 
     material.cauchyStresses(deformationGradient,cauchyStresses);
-    std::cout << deformationGradient << std::endl;
-    std::cout << cauchyStresses << std::endl;
+    //std::cout << deformationGradient << std::endl;
+    //std::cout << cauchyStresses << std::endl;
 
-    for (int row = 0; row < num_nodes; row++) {
-      for (int col = 0; col < num_nodes; col++) {
-        for (int j = 0; j < dim; j++) {
-          auto virtDeltStrain = deltaLinStrain[col][j];
+    for (int col = 0; col < num_nodes; col++) {
+      for (int j = 0; j < dim; j++) {
+        auto virtDeltStrain = deltaLinStrain[col][j];
+        for (int row = 0; row < num_nodes; row++) {
           for (int i = 0; i < dim; i++) {
             auto realDeltStrain = deltaLinStrain[row][i];
             cauchyStressInkrement = 0;
@@ -184,7 +184,7 @@ void assembleElementStiffnessMatrix(
             for (int m = 0; m<dim; m++) {
               for (int n = 0; n < dim; n++) {
                 for (int k = 0; k < dim; k++) {
-                  ll[m][n] += sortedGradients[row][i][m][k] * cauchyStresses[k][n];
+                  ll[m][n] += cauchyStresses[n][k] * sortedGradients[row][i][k][m];
                 }
               }
             }
@@ -194,15 +194,15 @@ void assembleElementStiffnessMatrix(
              Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
              Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
           }
-          residualVector[dim*col+j] -= Dune::BIW407::secondOrderContraction(cauchyStresses, virtDeltStrain);
         }
+        residualVector[dim*col+j] -= Dune::BIW407::secondOrderContraction(cauchyStresses, virtDeltStrain);
       }
     }
 
 
   }
 
-  /*
+  
   for (int i = 0; i < 8; i++) {
     for (int j = 0; j < 8; j++) {
       std::cout << elementMatrix[i][j] << " "; 
@@ -210,7 +210,7 @@ void assembleElementStiffnessMatrix(
     }
     std::cout << std::endl;
   }
-  std::cout << std::endl;*/
+  std::cout << std::endl;
 }
 
 template<class Basis, class Matrix>
@@ -273,7 +273,7 @@ void assembleStiffnessMatrix(const CurvedGridView& curvedGridView, const Displac
   auto localBasisView = displacements.basis().localView();
   // A view of the Displacement Function
   auto localDisplacementFunction = localFunction(displacements);
-  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0,330.0);
+  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0,170.0);
 
   // Traverse the reference grid
   for (const auto& element : elements(curvedGridView))
@@ -314,8 +314,8 @@ void assembleStiffnessMatrix(const CurvedGridView& curvedGridView, const Displac
 
         auto col = localBasisView.index(j);
         matrixEntry(matrix, row, col) += elementMatrix[i][j];
-        vectorEntry(rhs, row) += elementResidualVector[i];
       }
+      vectorEntry(rhs, row) += elementResidualVector[i];
     }
   }
 }
@@ -517,7 +517,7 @@ int main(int argc, char** argv)
     CGSolver<DisplacementVector> cg(
       stiffnessOperator,
       preconditioner,
-      1e-10, // Desired residual reduction factor
+      1e-13, // Desired residual reduction factor
       100, // Maximum number of iterations
       2); // Verbosity of the solver
   // Object storing some statistics about the solving process
