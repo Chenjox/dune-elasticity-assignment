@@ -16,20 +16,32 @@ void initialize()
   rng.seed(seed_val);
 }
 
-Dune::FieldMatrix<double, 2, 2> createDeformationGradient(double shear, double elongation, double rotation) {
+Dune::FieldMatrix<double, 2, 2> createDeformationGradient(double shear, double elongation) {
     
     Dune::FieldMatrix<double, 2, 2> deformationGradient(0);
-
-    double sinRotation = std::sin(rotation);
-    double cosRotation = std::cos(rotation);
-
-    deformationGradient[0][0] = 1.0*elongation * cosRotation;
-    deformationGradient[0][1] = shear *(- sinRotation);
-    deformationGradient[1][0] = sinRotation;
-    deformationGradient[1][1] = 1.0 * cosRotation;
+    deformationGradient[0][0] = 1.0*elongation;
+    deformationGradient[0][1] = shear;
+    deformationGradient[1][0] = 0.0;
+    deformationGradient[1][1] = 1.0;
 
     return deformationGradient;
 }
+
+Dune::FieldMatrix<double, 2, 2> createRotationMatrix(double rotation) {
+    
+    Dune::FieldMatrix<double, 2, 2> rotationMatrix(0);
+
+    double cosRot = std::cos(rotation);
+    double sinRot = std::sin(rotation);
+
+    rotationMatrix[0][0] = cosRot;
+    rotationMatrix[0][1] = -sinRot;
+    rotationMatrix[1][0] = sinRot;
+    rotationMatrix[1][1] = cosRot;
+
+    return rotationMatrix;
+}
+
 Dune::FieldMatrix<double, 2, 2> invertDeformationGradient(const Dune::FieldMatrix<double, 2, 2>& deformationGradient) {
     
     double d = deformationGradient.determinant();
@@ -79,7 +91,8 @@ int main (int argc, char** argv)
         double rotation = distribution(rng);
 
     // Hello there
-        const auto deformation = createDeformationGradient(shear, elongation, rotation);
+        const auto rotMatrix = createRotationMatrix(rotation);
+        const auto deformation = rotMatrix * createDeformationGradient(shear, elongation);
         auto jacobian = deformation.determinant();
 
 
@@ -118,11 +131,12 @@ int main (int argc, char** argv)
   
                   double forwardDifference = 2.0*(forwardEnergy - middleEnergy)/(perturb);
                   double backwardDifference = 2.0*(middleEnergy - backwardEnergy)/(perturb);
+                  double centralDifference = (forwardEnergy - backwardEnergy)/perturb;
 
-                  if (std::abs(SecondPK[entryi][entryj] - forwardDifference) > 10.0 || std::abs(SecondPK[entryi][entryj] - backwardDifference) > 10.0 ){
+                  if (std::abs(SecondPK[entryi][entryj] - centralDifference) > 10.0 || std::abs(SecondPK[entryi][entryj] - forwardDifference) > 10.0 || std::abs(SecondPK[entryi][entryj] - backwardDifference) > 10.0 ){
                     // Error itself
                     std::cerr << "Error: Derivative does not match at [" << entryi << ", " << entryj << "]!"  << std::endl;
-                    std::cerr << "Forward/Backward Difference: " << forwardDifference << "/" << backwardDifference << std::endl;
+                    std::cerr << "Forward/Cnetral/Backward Difference: " << forwardDifference << "/" << centralDifference <<"/" << backwardDifference << std::endl;
                     std::cerr << "Derivative: " << SecondPK[entryi][entryj] << std::endl;
                     std::cerr << "Multiples: " << SecondPK[entryi][entryj]/forwardDifference << std::endl;
 

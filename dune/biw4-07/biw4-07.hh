@@ -37,26 +37,48 @@ namespace Dune {
             return result;
         }
 
+
+        template<int dim, class field_type=double>
+        static Dune::FieldMatrix<field_type, dim, dim> inverse(const Dune::FieldMatrix<field_type, dim, dim>& A) {
+            Dune::FieldMatrix<field_type, dim, dim> result(0);
+
+            auto det = A.determinant();
+
+            if (dim == 2) {
+                result[0][0] = 1.0/det * A[1][1];
+                result[0][1] = -1.0/det * A[1][0];
+                result[1][0] = -1.0/det * A[0][1];
+                result[1][1] = 1.0/det * A[0][0];
+                return result;
+            }
+        }
+
+        //! C = F * F^T
         template<int dim, class field_type=double>
         static void leftCauchyGreenStretch(const Dune::FieldMatrix<field_type, dim, dim>& deformationGradient,Dune::FieldMatrix<field_type, dim, dim>& leftCauchyGreen){
+            leftCauchyGreen = deformationGradient * deformationGradient.transposed();
+            /*
             for (int i=0; i<dim ; ++i) {
                 for (int j=0; j<dim; ++j){
                     for (int k = 0; k < dim; ++k) {
                         leftCauchyGreen[i][j] += deformationGradient[i][k] * deformationGradient[j][k];
                     }
                 }
-            }
+            }*/
         }
 
+        //! b = F^T * F
         template<int dim, class field_type=double>
         static void rightCauchyGreenStretch(const Dune::FieldMatrix<field_type, dim, dim>& deformationGradient,Dune::FieldMatrix<field_type, dim, dim>& rightCauchyGreen){
+            rightCauchyGreen = deformationGradient.transposed() * deformationGradient;
+            /*
             for (int i=0; i<dim ; ++i) {
                 for (int j=0; j<dim; ++j){
                     for (int k = 0; k < dim; ++k) {
                         rightCauchyGreen[i][j] += deformationGradient[k][i] * deformationGradient[k][j];
                     }
                 }
-            }
+            }*/
         }
 
         template<int dim>
@@ -220,13 +242,16 @@ namespace Dune {
                 double traceb = 0.0;
                 
                 leftCauchyGreenStretch(deformationGradient, leftCauchy);
+                
+                leftCauchySquared = leftCauchy * leftCauchy;
+                
                 for (int i = 0; i < dim; i++) {
                     traceb += leftCauchy[i][i];
-                    for (int j = 0; j < dim; j++) {
-                        for (int k = 0; k < dim; k++) {
-                            leftCauchySquared[i][j] += leftCauchy[i][k]*leftCauchy[k][j];
-                        }
-                    }
+                    //for (int j = 0; j < dim; j++) {
+                    //    for (int k = 0; k < dim; k++) {
+                    //        leftCauchySquared[i][j] += leftCauchy[i][k]*leftCauchy[k][j];
+                    //    }
+                    //}
                 }
                 traceb += 1.0; // Plane Strain Correction!
 
