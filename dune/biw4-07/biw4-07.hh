@@ -247,11 +247,6 @@ namespace Dune {
                 
                 for (int i = 0; i < dim; i++) {
                     traceb += leftCauchy[i][i];
-                    //for (int j = 0; j < dim; j++) {
-                    //    for (int k = 0; k < dim; k++) {
-                    //        leftCauchySquared[i][j] += leftCauchy[i][k]*leftCauchy[k][j];
-                    //    }
-                    //}
                 }
                 traceb += 1.0; // Plane Strain Correction!
 
