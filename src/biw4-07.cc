@@ -91,7 +91,7 @@ void assembleElementStiffnessMatrix(
   int num_nodes = localBasis.size();
 
   // take necessary integration order.
-  int order = (dim*localBasis.order());
+  int order = (2*dim*localBasis.order());
   const auto& quad = QuadratureRules<double,dim>::rule(element.type(), order);
 
   auto localDisplacmentDerivative = derivative(localDisplacements);
@@ -151,9 +151,9 @@ void assembleElementStiffnessMatrix(
     // now to the displacement gradient in spatial coordinates
     auto displacementGradient = localDisplacmentDerivative(quadPoint.position());
 
-    Dune::FieldMatrix<double, dim, dim> InverseDeformationGradient = -displacementGradient;
+    Dune::FieldMatrix<double, dim, dim> InverseDeformationGradient = displacementGradient;
 
-    //InverseDeformationGradient *= -1.0;
+    InverseDeformationGradient *= -1.0;
 
     InverseDeformationGradient[0][0] += 1.0;
     InverseDeformationGradient[1][1] += 1.0;
@@ -168,41 +168,39 @@ void assembleElementStiffnessMatrix(
     //std::cout << deformationGradient << std::endl;
     //std::cout << cauchyStresses << std::endl;
 
+    // Geometrical Stiffness!
+    for (int row = 0; row < num_nodes; row++) {
+        for (int col = 0; col < num_nodes; col++) {
+          FieldMatrix<double, dim, dim> ll(0.0);
+          ll = cauchyStresses * sortedGradients[row][1];
+          auto other = sortedGradients[col][0];
+          double value = Dune::BIW407::secondOrderContraction(ll, other);
+          elementMatrix[dim*row][dim*col] +=  value * quadPoint.weight() * integrationElement;
+          elementMatrix[dim*row+1][dim*col+1] += value * quadPoint.weight() * integrationElement;
+      }
+    }
+    
     for (int row = 0; row < num_nodes; row++) {
       for (int i = 0; i < dim; i++) {
         auto realDeltStrain = deltaLinStrain[row][i];
+        cauchyStressInkrement = 0;
+        material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
           for (int col = 0; col < num_nodes; col++) {
             for (int j = 0; j < dim; j++) {
             auto virtDeltStrain = deltaLinStrain[col][j];
-            cauchyStressInkrement = 0;
-
-            //std::cout << realDeltStrain << std::endl;
-            material.cauchyStressInkrement(deformationGradient,realDeltStrain,cauchyStressInkrement);
-
-            //std::cout << cauchyStressInkrement << std::endl;
-            FieldMatrix<double, dim, dim> ll(0.0);
-            for (int m = 0; m<dim; m++) {
-              for (int n = 0; n < dim; n++) {
-                for (int k = 0; k < dim; k++) {
-                  ll[m][n] += cauchyStresses[n][k] * sortedGradients[row][i][k][m];
-                }
-              }
-            }
-            //std::cout << ll << std::endl;
 
             elementMatrix[dim*row+i][dim*col+j] +=
-             Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement +
-             Dune::BIW407::secondOrderContraction(ll, sortedGradients[col][j]) * quadPoint.weight() * integrationElement;
-          }
+             Dune::BIW407::secondOrderContraction(cauchyStressInkrement,virtDeltStrain) * quadPoint.weight() * integrationElement;
+            }
         }
-        residualVector[dim*row+i] -= Dune::BIW407::secondOrderContraction(cauchyStresses, realDeltStrain);
+        residualVector[dim*row+i] -= Dune::BIW407::secondOrderContraction(cauchyStresses, realDeltStrain) * quadPoint.weight() * integrationElement;
       }
     }
 
 
   }
 
-  /*
+  
   for (int i = 0; i < 8; i++) {
     for (int j = 0; j < 8; j++) {
       std::cout << elementMatrix[i][j] << " "; 
@@ -211,7 +209,7 @@ void assembleElementStiffnessMatrix(
     std::cout << std::endl;
   }
   std::cout << std::endl;
-  */
+  
 }
 
 template<class Basis, class Matrix>
@@ -457,7 +455,7 @@ int main(int argc, char** argv)
   //std::cout << "Dirichlet step." << std::endl;
   
 
-    stiffnessMatrix.mmv(u,rhs);
+    //stiffnessMatrix.mmv(u,rhs);
 
 
     //std::cout << stiffnessMatrix. << std::endl;
@@ -547,7 +545,7 @@ int main(int argc, char** argv)
     vtkWriter.addPointData(displacementFunctionMaterial, "displacement");
     vtkWriter.write("displacement-result.vtu");
 
-  } while (uIncrement.two_norm() > 1e-10 && iter_num < 2);
+  } while (uIncrement.two_norm() > 1e-10 && iter_num < 4);
 
 
   //std::cout << xIncrement << std::endl;
