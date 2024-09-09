@@ -93,7 +93,7 @@ int main (int argc, char** argv)
 
     // Hello there
         const auto rotMatrix = createRotationMatrix(rotation);
-        const auto deformation = createDeformationGradient(shear, elongation);
+        const auto deformation = rotMatrix*createDeformationGradient(shear, elongation);
         auto jacobian = deformation.determinant();
 
 

@@ -168,18 +168,19 @@ void assembleElementStiffnessMatrix(
     //std::cout << deformationGradient << std::endl;
     //std::cout << cauchyStresses << std::endl;
 
-    // Geometrical Stiffness!
+    // Geometrical Tangent!
+    // 
     for (int row = 0; row < num_nodes; row++) {
         for (int col = 0; col < num_nodes; col++) {
-          FieldMatrix<double, dim, dim> ll(0.0);
-          ll = cauchyStresses * sortedGradients[row][1];
-          auto other = sortedGradients[col][0];
-          double value = Dune::BIW407::secondOrderContraction(ll, other);
+          FieldVector<double, dim> firstEnergy(0.0);
+          cauchyStresses.mv(gradients[row], firstEnergy);
+          auto other = gradients[col];
+          double value = other.dot(firstEnergy);
           elementMatrix[dim*row][dim*col] +=  value * quadPoint.weight() * integrationElement;
           elementMatrix[dim*row+1][dim*col+1] += value * quadPoint.weight() * integrationElement;
       }
     }
-    
+    // Material Tangent
     for (int row = 0; row < num_nodes; row++) {
       for (int i = 0; i < dim; i++) {
         auto realDeltStrain = deltaLinStrain[row][i];
