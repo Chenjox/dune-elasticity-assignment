@@ -305,8 +305,8 @@ namespace Dune {
                     for (int j = 0; j < dim; j++) {
                         cauchyStressInkrement[i][j] = 1.0/jacobian *
                         (
-                            _firstLameParameter * ( froebenius * leftCauchy[i][j] )
-                            + 2.0* _shearModulus * ( transportCauchy[i][j])
+                            2.0 * _firstLameParameter * ( froebenius * leftCauchy[i][j] )
+                            +4.0* _shearModulus * ( transportCauchy[i][j])
                         );
                     }
                 }

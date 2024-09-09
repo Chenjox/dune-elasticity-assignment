@@ -82,14 +82,14 @@ int main(int argc, char **argv) {
 
   int constexpr dim = 2;
 
-  std::uniform_real_distribution<double> distribution(-9.0, 9.0);
+  std::uniform_real_distribution<double> distribution(-2.0, 2.0);
 
-  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0, 200.0);
+  auto material = Dune::BIW407::NeoHookeMaterial<2>(100.0, 170.0);
 
   int entries[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
 
-  double perturb = 1e-6;
-  for (int _i = 0; _i < dim; _i++) {
+  double perturb = 1e-7;
+  for (int _i = 0; _i < 100; _i++) {
 
     ////
     // Step 1: Create a viable Deformation Gradient
@@ -268,7 +268,7 @@ int main(int argc, char **argv) {
 
         for (int i = 0; i < dim; i++)
           for (int j = 0; j < dim; j++) {
-            if (std::abs(sigmaInkrement[i][j] - stressInkrement[i][j]) > 10.0) {
+            if (std::abs(1.0 - sigmaInkrement[i][j]/stressInkrement[i][j]) > 0.2) {
 
 
               Dune::FieldMatrix<double, dim, dim> relErrorMatrix(0);

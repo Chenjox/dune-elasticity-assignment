@@ -532,7 +532,7 @@ int main(int argc, char **argv) {
     vtkWriter.addPointData(displacementFunctionMaterial, "displacement");
     vtkWriter.write("displacement-result.vtu");
 
-  } while (uIncrement.two_norm() > 1e-10 && iter_num < 4);
+  } while (rhs.two_norm() > 1e-10 && iter_num < 4);
 
   // std::cout << xIncrement << std::endl;
 }
