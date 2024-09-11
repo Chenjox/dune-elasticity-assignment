@@ -68,7 +68,7 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
   const Element element = localBasisView.element();
   constexpr int dim = Element::dimension;
 
-  // take the geometry information, constructed from the local displacements
+  // take the geometry information.
   auto geometry = element.geometry();
 
   // Set the size of the element stiffness and residual vector
@@ -88,10 +88,10 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
   int order = (2 * dim * localBasis.order());
   const auto &quad = QuadratureRules<double, dim>::rule(element.type(), order);
 
-  auto localDisplacmentDerivative = derivative(localDisplacements);
+  auto localDisplacementDerivative = derivative(localDisplacements);
 
   // Loop over all quadrature points
-  for (const auto &quadPoint : quad) {
+  for (auto [position, weight] : quad) {
 
     // std::cout << "T" << std::endl;
 
@@ -99,27 +99,26 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
     // reference element to the element to the spatial coordinates
     // This transforms the scalar gradients of the shape functions, not the
     // vector gradient
-    const auto jacobianInverseTransposed =
-        geometry.jacobianInverseTransposed(quadPoint.position());
+    const auto geometryJacobianInverse =
+        geometry.jacobianInverse(position);
 
     // The multiplicative factor in the integral transformation formula
     // (chain-rule)
     const auto integrationElement =
-        geometry.integrationElement(quadPoint.position());
+        geometry.integrationElement(position);
 
     //
     std::vector<FieldMatrix<double, 1, dim>> referenceGradients;
-    localBasis.evaluateJacobian(quadPoint.position(), referenceGradients);
+    localBasis.evaluateJacobian(position, referenceGradients);
     // Compute the shape function gradients on the grid element
-    std::vector<FieldVector<double, dim>> gradients(referenceGradients.size());
+    std::vector<FieldMatrix<double, 1, dim>> gradients(referenceGradients.size());
     for (size_t i = 0; i < gradients.size(); i++) {
-      gradients[i] = 0.0;
-      jacobianInverseTransposed.mv(referenceGradients[i][0], gradients[i]);
-      // std::cout << gradients[i] << std::endl;
+      // Typen sind komisch
+      gradients[i] = referenceGradients[i] * geometryJacobianInverse;
     }
 
     // A two dimensional list of FieldMatrizes,
-    // storing the strains of every shape function of every strain.
+    // storing the strains of every shape function of every node.
     // seems inefficient to me, but it works.
     std::vector<std::array<FieldMatrix<double, dim, dim>, dim>> deltaLinStrain(
         num_nodes);
@@ -130,7 +129,7 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
       for (size_t k = 0; k < dim; k++) {
         //
         FieldMatrix<double, dim, dim> displacementGradiente(0);
-        displacementGradiente[k] = gradients[i];
+        displacementGradiente[k] = gradients[i][0];
         // elementMatrix[row][col] += ( gradients[i] * gradients[j] )*
         // quadPoint.weight() * integrationElement;
 
@@ -146,11 +145,14 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
     }
 
     // now to the displacement gradient in spatial coordinates
+    // May be redundant try geometry.jacobian
     auto displacementGradient =
-        localDisplacmentDerivative(quadPoint.position());
+        localDisplacementDerivative(position);
 
     Dune::FieldMatrix<double, dim, dim> InverseDeformationGradient =
         displacementGradient;
+
+    // Copy and invert TODO 
 
     InverseDeformationGradient *= -1.0;
 
@@ -161,7 +163,7 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
         Dune::BIW407::inverse(InverseDeformationGradient);
 
     FieldMatrix<double, dim, dim> cauchyStresses(0);
-    FieldMatrix<double, dim, dim> cauchyStressInkrement(0);
+    FieldMatrix<double, dim, dim> cauchyStressIncrement(0);
 
     material.cauchyStresses(deformationGradient, cauchyStresses);
     // std::cout << deformationGradient << std::endl;
@@ -173,35 +175,36 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
       for (int col = 0; col < num_nodes; col++) {
         FieldVector<double, dim> firstEnergy(0.0);
         cauchyStresses.mv(gradients[row], firstEnergy);
-        auto other = gradients[col];
+        auto other = gradients[col][0];
         double value = other.dot(firstEnergy);
+        // TODO: do it dimension independent
         elementMatrix[dim * row][dim * col] +=
-            value * quadPoint.weight() * integrationElement;
+            value * weight * integrationElement;
         elementMatrix[dim * row + 1][dim * col + 1] +=
-            value * quadPoint.weight() * integrationElement;
+            value * weight * integrationElement;
       }
     }
     // Material Tangent
     for (int row = 0; row < num_nodes; row++) {
       for (int i = 0; i < dim; i++) {
         auto realDeltStrain = deltaLinStrain[row][i];
-        cauchyStressInkrement = 0;
+        cauchyStressIncrement = 0;
         material.cauchyStressInkrement(deformationGradient, realDeltStrain,
-                                       cauchyStressInkrement);
+                                       cauchyStressIncrement);
         for (int col = 0; col < num_nodes; col++) {
           for (int j = 0; j < dim; j++) {
             auto virtDeltStrain = deltaLinStrain[col][j];
 
             elementMatrix[dim * row + i][dim * col + j] +=
-                Dune::BIW407::secondOrderContraction(cauchyStressInkrement,
+                Dune::BIW407::secondOrderContraction(cauchyStressIncrement,
                                                      virtDeltStrain) *
-                quadPoint.weight() * integrationElement;
+                weight * integrationElement;
           }
         }
         residualVector[dim * row + i] -=
             Dune::BIW407::secondOrderContraction(cauchyStresses,
                                                  realDeltStrain) *
-            quadPoint.weight() * integrationElement;
+            weight * integrationElement;
       }
     }
   }
@@ -252,6 +255,7 @@ decltype(auto) matrixEntry(Matrix &matrix, const MultiIndex &row,
   return matrix[row[0]][col[0]][row[1]][col[1]];
 }
 
+// This should be a vector BACKEND
 template <class Vector, class MultiIndex>
 decltype(auto) vectorEntry(Vector &vector, const MultiIndex &row) {
   using namespace Indices;
@@ -305,7 +309,7 @@ void assembleStiffnessMatrix(const CurvedGridView &curvedGridView,
 
 int main(int argc, char **argv) {
   // Maybe initialize MPI
-  MPIHelper &helper = Dune::MPIHelper::instance(argc, argv);
+  Dune::MPIHelper::instance(argc, argv);
   // World Dimension
   constexpr int dim = 2;
   // Linear Ansatz Order
@@ -330,7 +334,7 @@ int main(int argc, char **argv) {
 
   // this is not a GlobalDiscreteGridFuntion, only a GridViewable Function,
   auto spatialCoordinates =
-      discreteGridViewFunction<2>(refGrid.leafGridView(), p);
+      discreteGridViewFunction<dim>(refGrid.leafGridView(), p);
 
   // Interpolate the initial Geometry
   auto unityFunctor = [](const auto &u) { return u; };
@@ -355,7 +359,9 @@ int main(int argc, char **argv) {
   // which is a function on the reference geometry
   using namespace Functions::BasisFactory;
   auto lagrangeBasis =
-      makeBasis(gridView, power<dim>(lagrange<p>(), blockedInterleaved()));
+      makeBasis(gridView, 
+      power<dim>(lagrange<p>(), 
+      blockedInterleaved()));
   // Blocked interleaved allows for efficent sparsity structure.
 
   ///////////////////////////////////////////////////////////
@@ -403,7 +409,7 @@ int main(int argc, char **argv) {
           spatialCoordinates.basis(), u);
   //////////////
 
-  using namespace Indices;
+  //using namespace Indices;
   for (auto &&b0i : isBoundary)
     for (std::size_t j = 0; j < b0i.size(); ++j)
       b0i[j] = false;
@@ -441,6 +447,7 @@ int main(int argc, char **argv) {
     iter_num++;
 
     // modify rhs to incorporate dirichlet values
+    // aus Curved Grid 
     Functions::interpolate(displacementFunction.basis(), u, g, isBoundary);
 
     assembleStiffnessMatrix(gridView, displacementFunction, stiffnessMatrix,
@@ -466,7 +473,8 @@ int main(int argc, char **argv) {
               auto col = localView.index(j);
               matrixEntry(stiffnessMatrix, row, col) = (i == j) ? 1.0 : 0;
             }
-            vectorEntry(rhs, row) = vectorEntry(u, row);
+            // 
+            vectorEntry(rhs, row) = 0.0;//vectorEntry(u, row);
           }
         }
       }
@@ -498,6 +506,7 @@ int main(int argc, char **argv) {
     cg.apply(uIncrement, rhs, statistics);
 
     // Changing the Inkrement to exclude the dirichlet Values
+    // the inkrement should be zero anyway!
     auto localView = displacementFunction.basis().localView();
     for (const auto &element : elements(gridView)) {
       localView.bind(element);
@@ -517,8 +526,6 @@ int main(int argc, char **argv) {
     spatialCoordinates.coefficients() += initialX;
     spatialCoordinates.coefficients() += u;
 
-    // Interpolate new geometry
-
     std::cout << rhs.two_norm() << std::endl;
     std::cout << uIncrement << std::endl;
     std::cout << u << std::endl;
@@ -526,6 +533,7 @@ int main(int argc, char **argv) {
 
     // Because the Displacements live on the reference configuration, the
     // reference _grid_ will be written.
+    // Gedanke: Hier müsste Curved Grid direkt reingepackt werden können.
     using DataCollector = Vtk::LagrangeDataCollector<RefGridView, p>;
     using Writer = VtkUnstructuredGridWriter<RefGridView, DataCollector>;
     Writer vtkWriter(refGridView);
