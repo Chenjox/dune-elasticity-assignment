@@ -31,7 +31,8 @@ Dune::FieldMatrix<double, 2, 2> createDeformationGradient(double shear,
   return deformationGradient;
 }
 
-Dune::FieldVector<double, 2> calcInvariants(const Dune::FieldMatrix<double, 2, 2> &mat) {
+Dune::FieldVector<double, 2>
+calcInvariants(const Dune::FieldMatrix<double, 2, 2> &mat) {
   double det = mat.determinant();
   double trace = mat[0][0] + mat[1][1];
 
@@ -40,7 +41,7 @@ Dune::FieldVector<double, 2> calcInvariants(const Dune::FieldMatrix<double, 2, 2
   return result;
 }
 
-double kron2(size_t a, size_t b){
+double kron2(size_t a, size_t b) {
   if (a == b) {
     return 1.0;
   } else {
@@ -48,8 +49,8 @@ double kron2(size_t a, size_t b){
   }
 }
 
-double kron4(size_t a, size_t b, size_t c, size_t d){
-  return 0.5 * (kron2(a, c) *kron2(b, d) + kron2(a, d)*kron2(b,c));
+double kron4(size_t a, size_t b, size_t c, size_t d) {
+  return 0.5 * (kron2(a, c) * kron2(b, d) + kron2(a, d) * kron2(b, c));
 }
 
 Dune::FieldMatrix<double, 2, 2> createRotationMatrix(double rotation) {
@@ -107,7 +108,7 @@ int main(int argc, char **argv) {
 
   std::uniform_real_distribution<double> distribution(-2.0, 2.0);
 
-  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0, 170.0);
+  auto material = Dune::BIW407::NeoHookeMaterial<2>(100.0, 170.0);
 
   int entries[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
 
@@ -162,7 +163,7 @@ int main(int argc, char **argv) {
     const auto jacobian = deformationStep1.determinant();
 
     // Check if it is physical
-    if (jacobian != 0 && std::abs(jacobian) > 1e-4) {
+    if (jacobian != 0 && jacobian > 1e-4) {
       // std::cout << jacobian << std::endl;
       Dune::FieldMatrix<double, 2, 2> rightCauchyGreen(0);
       // const auto inverseDeformation = invertDeformationGradient(deformation);
@@ -204,7 +205,7 @@ int main(int argc, char **argv) {
           cauchyGreenImin[entryj][entryi] -= perturb;
           cauchyGreenIplu[entryi][entryj] += perturb;
           cauchyGreenIplu[entryj][entryi] += perturb;
-        }else{
+        } else {
           cauchyGreenImin[entryi][entryj] -= perturb;
           cauchyGreenIplu[entryi][entryj] += perturb;
         }
@@ -222,24 +223,22 @@ int main(int argc, char **argv) {
         auto centralDifference = (plusIIPK - minuIIPK) / (2.0 * cperturb);
         auto backwardDifference = (middleIIPK - minuIIPK) / cperturb;
 
-        
-
         for (int n = 0; n < 4; n++) {
           int entryI = entries[n][0];
           int entryJ = entries[n][1];
 
           double average = ((forwardDifference[entryI][entryJ] +
-               centralDifference[entryI][entryJ] +
-               backwardDifference[entryI][entryJ]) /
-              3.0 +(forwardDifference[entryJ][entryI] +
-               centralDifference[entryJ][entryI] +
-               backwardDifference[entryJ][entryI]) /
-              3.0);
+                             centralDifference[entryI][entryJ] +
+                             backwardDifference[entryI][entryJ]) /
+                                3.0 +
+                            (forwardDifference[entryJ][entryI] +
+                             centralDifference[entryJ][entryI] +
+                             backwardDifference[entryJ][entryI]) /
+                                3.0);
 
           double factor = kron4(entryi, entryj, entryI, entryJ);
 
-          materialTensor[entryi][entryj][entryI][entryJ] +=
-              factor*average;
+          materialTensor[entryi][entryj][entryI][entryJ] += factor * average;
         }
       }
       // now the material Tensor is initialised.
@@ -294,15 +293,28 @@ int main(int argc, char **argv) {
             symGradient[i][j] += 0.5 * take;
             symGradient[j][i] += 0.5 * take;
           }
-        
-        if (_i == 0) {
-          symGradient[0][0] = 1.0;
+
+        if (_j == 0) {
+          symGradient[0][0] = 2.0;
+          symGradient[0][1] = 1.0;
+          symGradient[1][0] = 1.0;
+          symGradient[1][1] = 0.0;
+        }
+        if (_j == 0) {
+          symGradient[0][0] = 0.0;
+          symGradient[0][1] = 1.0;
+          symGradient[1][0] = 1.0;
+          symGradient[1][1] = 2.0;
+        }
+        if (_j == 2) {
+          symGradient[0][0] = 0.0;
           symGradient[0][1] = 0.5;
           symGradient[1][0] = 0.5;
           symGradient[1][1] = 0.0;
         }
 
-        material.cauchyStressInkrement(corrDeformation, symGradient,stressInkrement);
+        material.cauchyStressInkrement(corrDeformation, symGradient,
+                                       stressInkrement);
 
         sigmaInkrement = 0;
         for (int i = 0; i < dim; i++)
@@ -328,7 +340,7 @@ int main(int argc, char **argv) {
               std::cout << "Actual:" << std::endl
                         << stressInkrement << std::endl;
               auto evActual = calcInvariants(stressInkrement);
-              
+
               std::cout << "Actual principal components" << std::endl
                         << evActual << std::endl;
 
@@ -342,18 +354,13 @@ int main(int argc, char **argv) {
               std::cout << "Multiple Matrix" << std::endl
                         << relErrorMatrix << std::endl;
 
-              for (int i = 0; i < dim; i++) {
-                for (int j = 0; j < dim; j++) {
-                  for (int k = 0; k < dim; k++) {
-                    for (int l = 0; l < dim; l++) {
-                      std::cout << "[" << i << "," << j << "," << k << "," << l << "] " << materialTensor[i][j][k][l] << std::endl;
-                    }
-                  }
-                }
-              }
-
               std::cout << "At Deformation Gradient" << std::endl
                         << corrDeformation << std::endl;
+
+              std::cout << "Left Cauchy-Green" << std::endl
+                        << corrDeformation * corrDeformation.transposed()
+                        << std::endl;
+
               std::cout << "With symmetric strains" << std::endl
                         << symGradient << std::endl;
               DUNE_THROW(Dune::Exception,

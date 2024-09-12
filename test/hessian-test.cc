@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
     const auto jacobian = deformationStep1.determinant();
 
     // Check if it is physical
-    if (jacobian != 0 && std::abs(jacobian) > 1e-4) {
+    if (jacobian != 0 && jacobian > 1e-4) {
       // std::cout << jacobian << std::endl;
       Dune::FieldMatrix<double, 2, 2> rightCauchyGreen(0);
       // const auto inverseDeformation = invertDeformationGradient(deformation);

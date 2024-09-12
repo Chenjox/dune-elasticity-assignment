@@ -28,6 +28,16 @@ Dune::FieldMatrix<double, 2, 2> createDeformationGradient(double shear,
   return deformationGradient;
 }
 
+Dune::FieldVector<double, 2>
+calcInvariants(const Dune::FieldMatrix<double, 2, 2> &mat) {
+  double det = mat.determinant();
+  double trace = mat[0][0] + mat[1][1];
+
+  Dune::FieldVector<double, 2> result = {det, trace};
+
+  return result;
+}
+
 Dune::FieldMatrix<double, 2, 2> createRotationMatrix(double rotation) {
 
   Dune::FieldMatrix<double, 2, 2> rotationMatrix(0);
@@ -88,7 +98,7 @@ int main(int argc, char **argv) {
   int entries[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
 
   double perturb = 1e-7;
-  for (int _i = 0; _i < 100; _i++) {
+  for (int _i = 0; _i < 1000; _i++) {
 
     ////
     // Step 1: Create a viable Deformation Gradient
@@ -115,68 +125,41 @@ int main(int argc, char **argv) {
       const auto inverseDeformation =
           invertDeformationGradient(corrDeformation);
 
-      double middleEnergy = material.strainEnergyDensity(corrDeformation);
       Dune::FieldMatrix<double, 2, 2> SecondPK(0);
+      Dune::FieldMatrix<double, 2, 2> cauchy(0);
 
       material.secondPKStresses(corrDeformation, SecondPK);
+      material.cauchyStresses(corrDeformation, cauchy);
+
+      auto sigma = 1.0/jacobian * corrDeformation * SecondPK * corrDeformation.transposed();
 
       for (int m = 0; m < 4; m++) {
-        int entryi = entries[m][0];
-        int entryj = entries[m][1];
-        Dune::FieldMatrix<double, 2, 2> forward = rightCauchyGreen;
-        Dune::FieldMatrix<double, 2, 2> backward = rightCauchyGreen;
-        forward[entryi][entryj] += perturb;
-        backward[entryi][entryj] -= perturb;
-        const auto forwardDefo = rightCauchyToDeformation(forward);
-        const auto backwardDefo = rightCauchyToDeformation(backward);
-        double forwardEnergy = material.strainEnergyDensity(forwardDefo);
-        double backwardEnergy = material.strainEnergyDensity(backwardDefo);
+        auto entryi = entries[m][0];
+        auto entryj = entries[m][1];
 
-        double forwardDifference =
-            2.0 * (forwardEnergy - middleEnergy) / (perturb);
-        double backwardDifference =
-            2.0 * (middleEnergy - backwardEnergy) / (perturb);
-        double centralDifference = (forwardEnergy - backwardEnergy) / perturb;
+        if (std::abs(cauchy[entryi][entryj] -sigma[entryi][entryj]) > 1e-4) {
+            std::cout << "Actual:" << std::endl
+                  << cauchy << std::endl;
+            std::cout << "Actual Invariants" << std::endl
+                  << calcInvariants(cauchy) << std::endl;
 
-        if (1.0 - std::abs(SecondPK[entryi][entryj]/centralDifference) > 1.0 ||
-            1.0 - std::abs(SecondPK[entryi][entryj]/forwardDifference) > 1.0 ||
-            1.0 - std::abs(SecondPK[entryi][entryj]/backwardDifference) > 1.0) {
-          // Error itself
-          std::cerr << std::setprecision(9);
-          std::cerr << "Error: Derivative does not match at [" << entryi << ", "
-                    << entryj << "]!" << std::endl;
-          std::cerr << "Forward/Central/Backward Difference: "
-                    << forwardDifference << "/" << centralDifference << "/"
-                    << backwardDifference << std::endl;
-          std::cerr << "Derivative: " << SecondPK[entryi][entryj] << std::endl;
-          std::cerr << "Multiples: "
-                    << SecondPK[entryi][entryj] / forwardDifference
-                    << std::endl;
+            std::cout << "Numerically estimated" << std::endl
+                  << sigma << std::endl;
+            
+            std::cout << "Numerical Invariants" << std::endl
+                  << calcInvariants(sigma) << std::endl;
 
-          // Stresses in Full
-          std::cerr << "2nd PK: " << std::endl << SecondPK << std::endl;
-          std::cerr << "F: " << std::endl << corrDeformation << std::endl;
-          std::cerr << "F+eps: " << std::endl << forwardDefo << std::endl;
-          std::cerr << "F-eps: " << std::endl << backwardDefo << std::endl;
-          std::cerr << "F^-1" << std::endl << inverseDeformation << std::endl;
-          std::cerr << "det F" << std::endl << jacobian << std::endl;
+            std::cout << "Deformation Gradient" << std::endl
+                  << corrDeformation << std::endl;
 
-          // Right Cauchy Greens
-          std::cerr << "C: " << std::endl << rightCauchyGreen << std::endl;
-          std::cerr << "C+eps: " << std::endl << forward << std::endl;
-          std::cerr << "C-eps: " << std::endl << backward << std::endl;
+            std::cout << "Jacobian" << std::endl
+                  << jacobian << std::endl;
 
-          // Energys
-          std::cerr << "Actual Energy: " << std::endl
-                    << middleEnergy << std::endl;
-          std::cerr << "Actual Energy+eps: " << std::endl
-                    << forwardEnergy << std::endl;
-          std::cerr << "Actual Energy-eps: " << std::endl
-                    << backwardEnergy << std::endl;
-
-          DUNE_THROW(Dune::Exception, "Derivative does not match!");
+            
+            DUNE_THROW(Dune::Exception, "Derivative does not match!");
         }
       }
+
     }
   }
 }

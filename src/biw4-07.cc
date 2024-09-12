@@ -155,12 +155,12 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
     // Copy and invert TODO 
 
     InverseDeformationGradient *= -1.0;
+    for (int i = 0; i < dim; i++) {
+      InverseDeformationGradient[i][i] += 1.0;
+    }
 
-    InverseDeformationGradient[0][0] += 1.0;
-    InverseDeformationGradient[1][1] += 1.0;
-
-    auto deformationGradient =
-        Dune::BIW407::inverse(InverseDeformationGradient);
+    auto deformationGradient = InverseDeformationGradient;
+    deformationGradient.invert();
 
     FieldMatrix<double, dim, dim> cauchyStresses(0);
     FieldMatrix<double, dim, dim> cauchyStressIncrement(0);
@@ -173,49 +173,53 @@ void assembleElementStiffnessMatrix(const LocalView &localBasisView,
     //
     for (int row = 0; row < num_nodes; row++) {
       for (int col = 0; col < num_nodes; col++) {
-        FieldVector<double, dim> firstEnergy(0.0);
-        cauchyStresses.mv(gradients[row], firstEnergy);
-        auto other = gradients[col][0];
-        double value = other.dot(firstEnergy);
+        Dune::FieldMatrix<double, 1, dim> firstEnergy(0.0);
+        firstEnergy =  gradients[row] * cauchyStresses;
+        //cauchyStresses.mv(gradients[row], firstEnergy[0]);
+        auto other = gradients[col];
+        //TODO FIXME!
+        auto value =  firstEnergy * other.transposed() ;
+        // std::cout << value << std::endl;
         // TODO: do it dimension independent
-        elementMatrix[dim * row][dim * col] +=
-            value * weight * integrationElement;
-        elementMatrix[dim * row + 1][dim * col + 1] +=
-            value * weight * integrationElement;
+        for (int k = 0; k < dim; k++){
+          elementMatrix[dim * row+k][dim * col+k] +=
+              value[0][0] * weight * integrationElement;
+        }
       }
     }
     // Material Tangent
     for (int row = 0; row < num_nodes; row++) {
       for (int i = 0; i < dim; i++) {
-        auto realDeltStrain = deltaLinStrain[row][i];
+        auto virtDeltStrain = deltaLinStrain[row][i];
         cauchyStressIncrement = 0;
-        material.cauchyStressInkrement(deformationGradient, realDeltStrain,
+        material.cauchyStressInkrement(deformationGradient, virtDeltStrain,
                                        cauchyStressIncrement);
         for (int col = 0; col < num_nodes; col++) {
           for (int j = 0; j < dim; j++) {
-            auto virtDeltStrain = deltaLinStrain[col][j];
+            auto realDeltStrain = deltaLinStrain[col][j];
 
             elementMatrix[dim * row + i][dim * col + j] +=
                 Dune::BIW407::secondOrderContraction(cauchyStressIncrement,
-                                                     virtDeltStrain) *
+                                                     realDeltStrain) *
                 weight * integrationElement;
           }
         }
         residualVector[dim * row + i] -=
             Dune::BIW407::secondOrderContraction(cauchyStresses,
-                                                 realDeltStrain) *
+                                                 virtDeltStrain) *
             weight * integrationElement;
       }
     }
   }
 
+  /*
   for (int i = 0; i < 8; i++) {
     for (int j = 0; j < 8; j++) {
       std::cout << elementMatrix[i][j] << " ";
     }
     std::cout << std::endl;
   }
-  std::cout << std::endl;
+  std::cout << std::endl;*/
 }
 
 template <class Basis, class Matrix>
@@ -275,7 +279,7 @@ void assembleStiffnessMatrix(const CurvedGridView &curvedGridView,
   auto localBasisView = displacements.basis().localView();
   // A view of the Displacement Function
   auto localDisplacementFunction = localFunction(displacements);
-  auto material = Dune::BIW407::StVenantKirchhoffMaterial<2>(100.0, 170.0);
+  auto material = Dune::BIW407::NeoHookeMaterial<2>(100.0, 200.0);
 
   // Traverse the curved grid
   for (const auto &element : elements(curvedGridView)) {
@@ -323,7 +327,7 @@ int main(int argc, char **argv) {
   // But the reference Grid is still a YaspGrid for startes
   // We use YaspGrid for starters
   using RefGrid = Dune::YaspGrid<2>;
-  RefGrid refGrid{{1.0, 1.0}, {2, 2}};
+  RefGrid refGrid{{1.0, 1.0}, {4, 4}};
 
   auto refGridView = refGrid.leafGridView();
   using RefGridView = decltype(refGridView);
@@ -427,7 +431,7 @@ int main(int argc, char **argv) {
   // Funktion die den Dirichlet-Rand vorgibt
   auto &&g = [](Coordinate xmat) {
     return DisplacementRange{
-        -0.0, -0.01}; //(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
+        -0.1, 0.1}; //(std::abs(xmat[1] - 1.0) < 1e-8) ? 0.00002 : 0.0};
   };
 
   // Convenience Function for Boundary DOFs
@@ -507,29 +511,16 @@ int main(int argc, char **argv) {
 
     // Changing the Inkrement to exclude the dirichlet Values
     // the inkrement should be zero anyway!
-    auto localView = displacementFunction.basis().localView();
-    for (const auto &element : elements(gridView)) {
-      localView.bind(element);
-      for (size_t i = 0; i < localView.size(); ++i) {
-        auto row = localView.index(i);
-        // If row corresponds to a boundary entry,
-        if (isBoundaryBackend[row]) {
-          vectorEntry(uIncrement, row) = 0;
-          // vectorEntry(spatialCoordinates.coefficients(), row)
-          // +=vectorEntry(uIncrement, row);
-        }
-      }
-    }
     u += uIncrement;
 
     spatialCoordinates.coefficients() = 0;
     spatialCoordinates.coefficients() += initialX;
     spatialCoordinates.coefficients() += u;
 
-    std::cout << rhs.two_norm() << std::endl;
-    std::cout << uIncrement << std::endl;
-    std::cout << u << std::endl;
-    std::cout << spatialCoordinates.coefficients() << std::endl;
+    //std::cout << rhs.two_norm() << std::endl;
+    //std::cout << uIncrement << std::endl;
+    //std::cout << u << std::endl;
+    //std::cout << spatialCoordinates.coefficients() << std::endl;
 
     // Because the Displacements live on the reference configuration, the
     // reference _grid_ will be written.
@@ -540,7 +531,7 @@ int main(int argc, char **argv) {
     vtkWriter.addPointData(displacementFunctionMaterial, "displacement");
     vtkWriter.write("displacement-result.vtu");
 
-  } while (rhs.two_norm() > 1e-10 && iter_num < 4);
+  } while (iter_num < 100);
 
   // std::cout << xIncrement << std::endl;
 }
